@@ -1,0 +1,24 @@
+# ── 通用 ──────────────────────────────────────────────
+.DS_Store
+*.log
+*.iml
+.idea/
+.vscode/
+
+# ── Android / Gradle 构建产物 ──────────────────────────
+android/.gradle/
+android/build/
+android/app/build/
+android/.kotlin/
+android/local.properties
+android/captures/
+*.apk.idsig
+
+# 镜像分片为构建产物（由 scripts/build-image.py 生成，约 80MB，不入库）
+android/app/src/main/assets/images*.bin
+
+# ── Python 构建脚本 ────────────────────────────────────
+android/scripts/.cache/
+android/scripts/.stage/
+__pycache__/
+*.pyc
