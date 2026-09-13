@@ -14,7 +14,7 @@ Mobilecode v0.4 镜像构建器
 
 v0.4 附加：镜像瘦身（移除包管理器/孤儿库簇/info 文档）减小 APK 体积。
 
-依赖：python3 >= 3.8（标准库即可），网络可访问 termux 镜像与 npm registry。
+依赖：python3 >= 3.10（标准库即可），网络可访问 termux 镜像与 npm registry。
 用法：python3 scripts/build-image.py
 """
 
@@ -36,7 +36,7 @@ from pathlib import Path
 # App 在手机上的最终前缀（与 AndroidManifest package 一致的绝对路径）
 FINAL_PREFIX = "/data/user/0/com.codex.mobile/files/usr"
 TERMUX_PREFIX = "/data/data/com.termux/files/usr"
-RUNTIME_VERSION = "0.4.0"
+RUNTIME_VERSION = "0.4.1"
 CODEX_VERSION = "0.104.0"  # 与 app-server 前端 UI/protocol 配套，勿随意升级
 SHARD_COUNT = 4            # 设备端并行解压线程数
 
@@ -303,6 +303,11 @@ def write_wrapper(path: Path, script: str):
 # ── 主流程 ───────────────────────────────────────────────────────
 
 def main():
+    if sys.version_info < (3, 10):
+        raise SystemExit(
+            "[build-image] 需要 Python 3.10+（脚本使用 str | None 类型语法），"
+            f"当前 {sys.version.split()[0]}"
+        )
     CACHE.mkdir(parents=True, exist_ok=True)
     STAGE.mkdir(parents=True, exist_ok=True)
 
@@ -562,10 +567,13 @@ def verify_image_deps(usr: Path):
 # ── 6a. 分片打包 ────────────────────────────────────────────────
 
 def split_shards(raw_tar: Path, out_dir: Path, n: int) -> list:
-    """把未压缩 stage.tar 按条目大小贪心分成 n 个独立 gzip tar 分片。
+    """把未压缩 stage.tar 拆成 n 个独立 gzip tar 分片（体积+数量均衡）。
 
-    贪心策略：条目按大小降序，逐个放入当前累计最小的分片 → 分片体积均衡。
-    分片顺序互不影响（Kotlin 解压端会自动 mkdir 父目录）。
+    两阶段策略（针对"少数超大文件 + 大量小文件"的镜像结构）：
+    1. 先取最大的 n 个文件，各自独占一个分片（避免 2 个大文件把 2 个线程
+       占满、其余 3382 个小文件挤在另 2 个分片里的失衡情况）；
+    2. 剩余条目按大小降序贪心放入当前最小的分片。
+    分片顺序互不影响（解压端会自动 mkdir 父目录）。
     """
     outs = [out_dir / f"images{i}.bin" for i in range(n)]
     for o in outs:
@@ -577,15 +585,21 @@ def split_shards(raw_tar: Path, out_dir: Path, n: int) -> list:
         handles = [open(o, "wb") for o in outs]
         try:
             streams = [tarfile.open(fileobj=h, mode="w|gz") for h in handles]
-            try:
-                for m in members:
-                    i = min(range(n), key=lambda k: sizes[k])
-                    fobj = src.extractfile(m) if m.isfile() else None
-                    streams[i].addfile(m, fobj)
-                    sizes[i] += m.size
-            finally:
-                for s in streams:
-                    s.close()
+
+            def put(m, i):
+                fobj = src.extractfile(m) if m.isfile() else None
+                streams[i].addfile(m, fobj)
+                sizes[i] += m.size
+
+            # 阶段 1：最大的 n 个条目各占一个分片
+            big, rest = members[:n], members[n:]
+            for i, m in enumerate(big):
+                put(m, i)
+            # 阶段 2：其余按大小降序贪心放入当前最小的分片
+            for m in rest:
+                put(m, min(range(n), key=lambda k: sizes[k]))
+            for s in streams:
+                s.close()
         finally:
             for h in handles:
                 h.close()

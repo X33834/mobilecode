@@ -57,10 +57,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var serverManager: CodexServerManager
 
     // ── 进度跟踪状态 ───────────────────────────────────────────────
-    private var currentStep = -1
-    private var doneWeight = 0
-    private var startedAtMs = 0L
-    private var setupFinished = false
+    @Volatile private var currentStep = -1
+    @Volatile private var doneWeight = 0
+    @Volatile private var startedAtMs = 0L
+    @Volatile private var setupFinished = false
     private val tickHandler = Handler(Looper.getMainLooper())
     private val tickRunnable = object : Runnable {
         override fun run() {
@@ -89,15 +89,23 @@ class MainActivity : AppCompatActivity() {
 
         requestBatteryOptimizationExemption()
         startForegroundService()
+        setupWebView()
 
-        // 通知栏"重启工作台"动作：不重走完整 setup，只重启 server
+        // 通知栏"重启工作台"动作：不重走完整 setup，只重启 server（环境须已就绪）
         if (intent?.action == CodexForegroundService.ACTION_RESTART) {
             handleRestartAction()
             return
         }
 
-        setupWebView()
         startSetupFlow()
+    }
+
+    /** singleTop 下通知栏动作只走这里，必须单独处理，否则通知按钮失效。 */
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        if (intent?.action == CodexForegroundService.ACTION_RESTART) {
+            handleRestartAction()
+        }
     }
 
     override fun onDestroy() {
@@ -195,11 +203,14 @@ class MainActivity : AppCompatActivity() {
         tickHandler.post(tickRunnable)
     }
 
-    /** 进入第 [index] 步（0 起）。 */
+    /** 进入第 [index] 步（0 起）。beginStep 可能从后台线程调用，UI 更新必须回主线程。 */
     private fun beginStep(index: Int) {
         currentStep = index.coerceIn(0, STEP_COUNT - 1)
-        setStatus(STEPS[currentStep].label)
-        refreshMeta()
+        val label = STEPS[currentStep].label
+        runOnUiThread {
+            setStatus(label)
+            refreshMeta()
+        }
     }
 
     /** 标记当前步骤完成，推进进度条。 */
@@ -207,12 +218,17 @@ class MainActivity : AppCompatActivity() {
         if (currentStep in 0 until STEP_COUNT) {
             doneWeight += STEPS[currentStep].weight
         }
-        refreshMeta()
+        runOnUiThread { refreshMeta() }
     }
 
     private fun refreshMeta() {
         if (setupFinished) return
-        val fraction = if (TOTAL_WEIGHT > 0) doneWeight * 100 / TOTAL_WEIGHT else 0
+        var fraction = if (TOTAL_WEIGHT > 0) doneWeight * 100 / TOTAL_WEIGHT else 0
+        // 解压步骤内按分片完成数细分进度（0→25→50→75→100%），避免长时间卡 0%
+        if (currentStep == 0 && CodexServerManager.IMAGE_SHARD_COUNT > 0) {
+            val stepShare = STEPS[0].weight * 100 / TOTAL_WEIGHT
+            fraction = stepShare * extractionDoneShards.get() / CodexServerManager.IMAGE_SHARD_COUNT
+        }
         progressBar.post { progressBar.progress = fraction }
         val elapsedSec = ((System.currentTimeMillis() - startedAtMs) / 1000).coerceAtLeast(0)
         val elapsed = String.format(Locale.US, "%02d:%02d", elapsedSec / 60 % 60, elapsedSec % 60)
@@ -264,6 +280,14 @@ class MainActivity : AppCompatActivity() {
      * 不重走首次 setup（环境已就绪）。
      */
     private fun handleRestartAction() {
+        // 环境未就绪时（如首次启动点了通知），退回完整 setup
+        if (serverManager.needsInstall()) {
+            runOnUiThread {
+                toast("运行环境尚未就绪，正在走首次初始化…")
+                startSetupFlow()
+            }
+            return
+        }
         toast("正在重启工作台…")
         Thread {
             try {
@@ -287,7 +311,12 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
+    // 并行解压的分片完成数（用于解压步骤的进度条细分）
+    private val extractionDoneShards = java.util.concurrent.atomic.AtomicInteger(0)
+
     private fun runSetup() {
+        extractionDoneShards.set(0)
+
         // Step 0: 路径自愈 —— 镜像 shebang 写死 /data/user/0/…，个别设备 filesDir
         // 返回 /data/data/… 形式时补齐符号链接，保证 #! 可解析
         ensurePrefixPathAlias()
@@ -295,11 +324,18 @@ class MainActivity : AppCompatActivity() {
         // Step 1: 解压内置环境（成品镜像，4 分片并行，全部离线、一次成型）
         beginStep(0)
         updateDetail("并行解压内置运行环境…")
-        if (!serverManager.isRuntimeReady()) {
+        if (serverManager.needsInstall()) {
             updateDetail("首次使用：4 线程并行解压 Node.js / Codex 运行环境（无需联网）…")
-            val ok = serverManager.installRuntimeFromAssets { msg -> updateDetail(msg) }
+            val ok = serverManager.installRuntimeFromAssets { msg ->
+                if (msg.startsWith("完成，")) {
+                    extractionDoneShards.incrementAndGet()
+                    updateDetail(msg)
+                } else {
+                    updateDetail(msg)
+                }
+            }
             if (!ok) {
-                throw RuntimeException("内置环境解压失败，请重新安装 App")
+                throw RuntimeException("内置运行环境解压失败。点「重试」会重新解压（约 1 分钟）；若反复失败，请到「诊断与环境」查看存储空间是否充足")
             }
         }
         serverManager.ensureFullAccessConfig()
@@ -309,7 +345,7 @@ class MainActivity : AppCompatActivity() {
         // Step 2: 网络代理（原生二进制的 DNS/TLS 桥，本地进程）
         beginStep(1)
         if (!serverManager.startProxy()) {
-            throw RuntimeException("网络代理启动失败")
+            throw RuntimeException("本地网络代理启动失败。请点「重试」；若反复失败，可重启手机后再打开")
         }
         endStep()
 
@@ -327,14 +363,14 @@ class MainActivity : AppCompatActivity() {
         updateStatus(getString(R.string.status_starting_server))
         val started = serverManager.startServer()
         if (!started) {
-            throw RuntimeException(getString(R.string.error_server))
+            throw RuntimeException("工作台启动失败。请点「重试」；若反复失败，请到「诊断与环境」重置环境")
         }
         endStep()
 
         updateStatus(getString(R.string.status_waiting_server))
         val ready = serverManager.waitForServer(timeoutMs = 90_000)
         if (!ready) {
-            throw RuntimeException("Server did not start in time")
+            throw RuntimeException("工作台启动超时（90 秒未就绪）。请点「重试」；若反复失败，建议到「诊断与环境」重置环境")
         }
 
         // 关键路径完成 → 立刻进入工作台
@@ -405,6 +441,12 @@ class MainActivity : AppCompatActivity() {
         val homeSize = formatSize(dirSize(homeDir))
         val provider = serverManager.getConfiguredProvider() ?: "未配置"
         val serverRunning = serverManager.isRunning
+        val freeMb = try {
+            val stat = android.os.StatFs(this.filesDir.absolutePath)
+            stat.availableBytes / 1024 / 1024
+        } catch (_: Exception) {
+            -1L
+        }
 
         val text = buildString {
             append("运行环境版本：").append(runtimeVersion).append('\n')
@@ -413,6 +455,10 @@ class MainActivity : AppCompatActivity() {
             append("模型服务商：").append(provider).append('\n')
             append("环境占用：").append(usrSize).append('\n')
             append("用户数据：").append(homeSize).append('\n')
+            append("存储剩余：").append(if (freeMb >= 0) "${freeMb} MB" else "未知").append('\n')
+            if (freeMb in 0 until 500) {
+                append("⚠ 存储偏低（<500MB），解压环境可能失败，建议先清理\n")
+            }
         }
 
         runOnUiThread {
@@ -566,18 +612,55 @@ class MainActivity : AppCompatActivity() {
 
     // ── UI helpers ────────────────────────────────────────────────
 
+    /**
+     * 错误对话框：重试 / 诊断与环境 / 复制错误信息 / 退出。
+     * 失败时刻必须能直达排障入口（诊断页、复制信息反馈），否则用户只能反复重试。
+     */
     private fun showError(message: String) {
+        val items = arrayOf(
+            "重试",
+            "诊断与环境",
+            "复制错误信息",
+            "退出",
+        )
         AlertDialog.Builder(this)
             .setTitle(R.string.error_title)
             .setMessage(message)
-            .setPositiveButton(R.string.retry) { _, _ ->
-                startSetupFlow()
-            }
-            .setNegativeButton(R.string.cancel) { _, _ ->
-                finish()
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> startSetupFlow()
+                    1 -> showDiagnostics()
+                    2 -> copyErrorInfo(message)
+                    3 -> finish()
+                }
             }
             .setCancelable(false)
             .show()
+    }
+
+    /** 复制一条包含版本/机型/错误/存储余量的诊断信息，方便用户反馈。 */
+    private fun copyErrorInfo(message: String) {
+        val versionName = try {
+            packageManager.getPackageInfo(packageName, 0).versionName
+        } catch (_: Exception) {
+            "?"
+        }
+        val freeMb = try {
+            val stat = android.os.StatFs(filesDir.absolutePath)
+            stat.availableBytes / 1024 / 1024
+        } catch (_: Exception) {
+            -1
+        }
+        val text = buildString {
+            append("App: Mobilecode v").append(versionName).append('\n')
+            append("设备: ").append(Build.MANUFACTURER).append(' ').append(Build.MODEL).append('\n')
+            append("系统: Android ").append(Build.VERSION.RELEASE).append(" (API ").append(Build.VERSION.SDK_INT).append(')').append('\n')
+            append("存储剩余: ").append(if (freeMb >= 0) "${freeMb} MB" else "未知").append('\n')
+            append("错误: ").append(message).append('\n')
+        }
+        val clipboard = getSystemService(android.content.ClipboardManager::class.java)
+        clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("Mobilecode 错误信息", text))
+        toast("错误信息已复制，可粘贴到反馈中")
     }
 
     private fun showLoading(show: Boolean) {

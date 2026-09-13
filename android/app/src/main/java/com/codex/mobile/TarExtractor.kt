@@ -64,9 +64,10 @@ object TarExtractor {
                 var link = cstr(hdr, 157, 100)
                 val prefix = cstr(hdr, 345, 155)
 
+                if (prefix.isNotEmpty()) name = "$prefix/$name"
+                // PAX/GNU 长名给出的是完整路径，必须整体覆盖（前缀拼接会重复路径）
                 pendingName?.let { name = it; pendingName = null }
                 pendingLink?.let { link = it; pendingLink = null }
-                if (prefix.isNotEmpty()) name = "$prefix/$name"
 
                 val normalized = File(destDir, name).canonicalPath
                 if (!normalized.startsWith(destPath)) {
@@ -84,6 +85,30 @@ object TarExtractor {
                         skipPad(gz, size)
                         continue
                     }
+                    'x'.code -> { // PAX 扩展头：应用 path/linkpath 记录到下一个条目
+                        val records = readTextContent(gz, size)
+                        skipPad(gz, size)
+                        for (line in records.lineSequence()) {
+                            // 格式：<len> key=value（len 是整行长度）
+                            val sp = line.indexOf(' ')
+                            if (sp <= 0) continue
+                            val kv = line.substring(sp + 1)
+                            val eq = kv.indexOf('=')
+                            if (eq <= 0) continue
+                            val key = kv.substring(0, eq)
+                            val value = kv.substring(eq + 1)
+                            when (key) {
+                                "path" -> pendingName = value
+                                "linkpath" -> pendingLink = value
+                            }
+                        }
+                        continue
+                    }
+                    'g'.code -> { // PAX 全局头：跳过数据
+                        skip(gz, size)
+                        skipPad(gz, size)
+                        continue
+                    }
                     '5'.code -> { // 目录
                         makeDir(normalized, mode)
                         dirs++
@@ -91,6 +116,10 @@ object TarExtractor {
                     '2'.code -> { // 符号链接（镜像内已相对化 target）
                         val target = File(normalized)
                         deleteAny(target)
+                        // 分片并行解压时，父目录条目可能落在别的分片、由别的线程处理，
+                        // 必须先把父目录建好，否则 Os.symlink 抛 ENOENT 导致整片解压失败
+                        // （曾造成「打开就提示构建失败」）。
+                        target.parentFile?.mkdirs()
                         // 相对链接由 build-image.py 生成，设备端 filesDir 变化也不会断
                         Os.symlink(link, normalized)
                         links++
@@ -101,6 +130,9 @@ object TarExtractor {
                         FileOutputStream2(f).use { out ->
                             copyExact(gz, out, size)
                         }
+                        // tar 每个文件数据后补齐到 512 字节对齐，必须跳过，
+                        // 否则下一个头部解析错位（曾导致多条目分片解压失败）
+                        skipPad(gz, size)
                         if (mode != 0) Os.chmod(normalized, mode)
                         files++
                     }

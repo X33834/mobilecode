@@ -29,8 +29,9 @@ class CodexServerManager(private val context: Context) {
         // 与 app-server 前端 UI/protocol 匹配的锁版本（勿随意升级）
         private const val CODEX_VERSION = "0.104.0"
         // 内置镜像版本号，与镜像内 .runtime-version 一致（v0.4 起为分片镜像）
-        private const val RUNTIME_IMAGE_VERSION = "0.4.0"
+        private const val RUNTIME_IMAGE_VERSION = "0.4.1"
         // 构建期分出的独立 gzip+tar 分片；并行解压，线程数 = 分片数
+        const val IMAGE_SHARD_COUNT = 4
         private val IMAGE_SHARDS = listOf(
             "images0.bin",
             "images1.bin",
@@ -100,6 +101,13 @@ class CodexServerManager(private val context: Context) {
         return File(usrDir, "lib/node_modules/codex-web-local/dist-cli/index.js").exists()
     }
 
+    /** 是否需要（重新）安装环境：文件缺失，或版本与当前 APK 不匹配。 */
+    fun needsInstall(): Boolean {
+        val paths = BootstrapInstaller.getPaths(context)
+        val usrDir = File(paths.prefixDir)
+        return !isRuntimeReady() || !imageVersionOk(usrDir)
+    }
+
     /**
      * 把 APK 内置的成品镜像分片 images0..3.bin（gzip 压缩的 tar，构建期生成）
      * **并行**解压为完整 Linux 用户态。全程离线；版本不匹配或损坏时重建 usr/
@@ -111,7 +119,7 @@ class CodexServerManager(private val context: Context) {
         val paths = BootstrapInstaller.getPaths(context)
         val usrDir = File(paths.prefixDir)
 
-        if (isRuntimeReady() && imageVersionOk(usrDir)) {
+        if (!needsInstall()) {
             Log.i(TAG, "Runtime already installed at ${paths.prefixDir}")
             return true
         }
@@ -147,8 +155,11 @@ class CodexServerManager(private val context: Context) {
         } catch (e: Exception) {
             Log.e(TAG, "镜像解压失败: ${e.message}")
             deleteRecursive(usrDir)
-            throw RuntimeException("内置环境解压失败，请重新安装 App", e)
+            throw RuntimeException("内置运行环境解压失败（APK 数据可能损坏）", e)
         }
+
+        // 工作台/Codex 会把 TMPDIR 指向 usr/tmp，解压完必须确保该目录存在
+        File(paths.tmpDir).mkdirs()
 
         val ok = isRuntimeReady()
         Log.i(TAG, "installRuntimeFromAssets -> ready=$ok")
@@ -311,7 +322,15 @@ class CodexServerManager(private val context: Context) {
     // ── Proxy（原生二进制的 DNS/TLS 桥） ─────────────────────────
 
     fun startProxy(): Boolean {
-        if (proxyProcess != null) return true
+        // 进程已退出但对象未清空时视为未运行，重新拉起
+        if (proxyProcess != null) {
+            try {
+                proxyProcess?.exitValue()
+                proxyProcess = null // 已退出
+            } catch (_: IllegalThreadStateException) {
+                return true // 仍在运行
+            }
+        }
 
         val paths = BootstrapInstaller.getPaths(context)
         val proxyScript = File(paths.homeDir, "proxy.js")
@@ -358,11 +377,33 @@ class CodexServerManager(private val context: Context) {
                 line = reader.readLine()
             }
             Log.i(TAG, "Proxy exited with code: ${proc.waitFor()}")
+            // 进程退出后清空引用，下次 startProxy 能重新拉起
+            if (proxyProcess === proc) proxyProcess = null
         }.start()
 
-        Thread.sleep(800)
-        Log.i(TAG, "CONNECT proxy started on 127.0.0.1:$PROXY_PORT")
-        return true
+        // 验证代理真的在监听（proxy.js 启动失败会秒退，不能静默放行）
+        val deadline = System.currentTimeMillis() + 5_000
+        while (System.currentTimeMillis() < deadline) {
+            if (isPortOpen("127.0.0.1", PROXY_PORT)) {
+                Log.i(TAG, "CONNECT proxy started on 127.0.0.1:$PROXY_PORT")
+                return true
+            }
+            Thread.sleep(200)
+        }
+        Log.e(TAG, "Proxy did not listen on 127.0.0.1:$PROXY_PORT within 5s")
+        try { proc.destroy() } catch (_: Exception) {}
+        proxyProcess = null
+        return false
+    }
+
+    /** 探测本地端口是否已在监听（连接失败即返回 false）。 */
+    private fun isPortOpen(host: String, port: Int): Boolean {
+        return try {
+            java.net.Socket().use { it.connect(java.net.InetSocketAddress(host, port), 300) }
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 
     fun stopProxy() {
@@ -476,6 +517,8 @@ class CodexServerManager(private val context: Context) {
 
     fun ensureFullAccessConfig() {
         val paths = BootstrapInstaller.getPaths(context)
+        // 工作台/Codex 依赖 TMPDIR（usr/tmp）；二次启动（环境已就绪）也须确保存在
+        File(paths.tmpDir).mkdirs()
         val configDir = File(paths.homeDir, ".codex")
         configDir.mkdirs()
         val configFile = File(configDir, "config.toml")

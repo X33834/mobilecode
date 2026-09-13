@@ -9,13 +9,12 @@
     <string name="settings_saved_restart">已保存 API Key，正在重启工作台…</string>
     <string name="settings_saved_ok">API Key 已生效</string>
     <string name="settings_restart_fail">工作台重启失败，请重新打开 App</string>
-    <string name="api_key_title">配置 API</string>
     <string name="api_key_message">选择模型服务商并填入 API Key（只保存在本机）。\nDeepSeek / Qwen / GLM 可直接用。</string>
     <string name="api_key_hint">sk-…</string>
     <string name="ok">确定</string>
     <string name="cancel">取消</string>
     <string name="error_title">出错了</string>
-    <string name="error_bootstrap">环境初始化失败，请重试。若反复失败，请检查网络后重试。</string>
+    <string name="error_bootstrap">环境初始化失败。点「重试」可重试；若反复失败，请到「诊断与环境」查看详情或重置环境。</string>
     <string name="error_server">工作台启动失败。</string>
     <string name="retry">重试</string>
 </resources>
