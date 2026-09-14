@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/version-0.6.0-blue" alt="版本 0.6.0"></a>
+  <a href="#"><img src="https://img.shields.io/badge/version-0.6.1-blue" alt="版本 0.6.1"></a>
   <a href="#"><img src="https://img.shields.io/badge/platform-Android%207.0%2B%20(ARM64)-green" alt="平台"></a>
   <a href="#"><img src="https://img.shields.io/badge/language-EN%20%7C%20%E4%B8%AD%E6%96%87-orange" alt="语言"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-lightgrey" alt="许可证"></a>
@@ -73,7 +73,7 @@ Mobilecode 是一个**安卓端的 AI 编程工作台**。APK 内置了完整的
 
 1. **下载 APK**
 
-   最新版：[`release/Mobilecode-v0.6.0-release.apk`](release/Mobilecode-v0.6.0-release.apk)（约 90 MB）
+   最新版：[`release/Mobilecode-v0.6.1-release.apk`](release/Mobilecode-v0.6.1-release.apk)（约 90 MB）
 
 2. **安装**
 
@@ -130,7 +130,7 @@ python3 scripts/build-image.py
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                       Android APK（v0.6.0）                      │
+│                       Android APK（v0.6.1）                      │
 │                                                                 │
 │  ┌──────────────────────┐        ┌───────────────────────────┐  │
 │  │      WebView 界面     │        │  MainActivity             │  │

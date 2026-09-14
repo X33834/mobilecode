@@ -32,7 +32,7 @@ class CodexServerManager(private val context: Context) {
         // 与 app-server 前端 UI/protocol 匹配的锁版本（勿随意升级）
         private const val CODEX_VERSION = "0.104.0"
         // 内置镜像版本号，与镜像内 .runtime-version 一致（v0.4 起为分片镜像）
-        private const val RUNTIME_IMAGE_VERSION = "0.6.0"
+        private const val RUNTIME_IMAGE_VERSION = "0.6.1"
         // 构建期分出的独立 gzip+tar 分片；并行解压，线程数 = 分片数
         const val IMAGE_SHARD_COUNT = 4
         private val IMAGE_SHARDS = listOf(

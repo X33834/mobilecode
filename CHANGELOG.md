@@ -1,5 +1,39 @@
 # 更新日志
 
+## [v0.6.1] - 2026-09-14
+
+**v0.6.0 的补漏与固化：镜像回归扫描抓出最后一处 glibc 残留，端到端验证能力正式入仓**
+
+### 修复
+
+- **第三处 ripgrep 残留（`vendor/.../path/rg` 仍为 glibc）**：v0.6.0 只覆盖了 `@openai/codex/bin/rg`
+  与 `vendor/.../codex/rg` 两处，新的回归扫描器抓出 codex 包内还有第三份 rg 副本
+  （`codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex/path/rg`）仍是 glibc 链接 ——
+  真机上 Path 工具（文件搜索）调用它时必然失败。`build-image.py` 现在把 Termux bionic rg
+  覆盖到全部三处，并新增 `usr/bin/rg` 到镜像产物校验清单。
+- **自签证书缺 SAN 导致 rustls 校验失败**：验证器生成的 mock TLS 证书最初只写 CN，而引擎的
+  rustls 严格校验 SAN 扩展（不回退 CN）。`_gen_certs()` 已补
+  `subjectAltName=IP:127.0.0.1,DNS:localhost`。
+- **verify-runtime e2e 的 node 架构错配**：链路 B（协议桥）/链路 C（工作台）曾误用 arm64 node
+  在 x86 宿主跑纯 JS（`Exec format error`）。现明确分层：bridge 与工作台用宿主原生 node
+  （纯 JS 无平台依赖），引擎（musl aarch64）由 qemu 执行；链路 C 新增 `fakebin/codex` shim
+  代理 `spawn("codex")` 到 qemu 引擎（镜像内 `usr/bin/codex` 是设备 wrapper，宿主不可用）。
+
+### 新增：仓库级回归验证器 `android/scripts/verify-runtime.py`
+
+- **`scan`（L2 静态体检，纯 stdlib 无依赖）**：手写 ELF 解析（e_machine / PT_INTERP /
+  DT_NEEDED），逐文件校验 aarch64 架构、bionic interpreter、动态依赖在镜像内闭环、
+  悬空符号链接、dotslash 引导文件 —— 本次即由它抓出第三处 rg。v0.6.1 镜像 279 个 ELF 全过。
+- **`e2e`（qemu 端到端，三链路）**：① Responses 直连 + 工具循环收敛；② chat-bridge
+  （Responses⇄Chat 双向翻译）+ 工具循环收敛；③ 工作台开箱启动（HTTP 200 +
+  `/codex-api/meta/methods` 方法目录 60 个）。配套 `mock-openai.py`（双协议 + 工具调用往返桩）、
+  `run-e2e.sh`（残留进程清理入口）。改引擎/镜像/依赖后重跑 `run-e2e.sh` 即可全量回归。
+- 镜像重建：4 分片 85.3 MB / 4141 文件，`.runtime-version 0.6.1`；三链路 e2e 全部实测通过。
+
+### 其它
+
+- versionCode 13 → 14，versionName 0.6.1。
+
 ## [v0.6.0] - 2026-09-14
 
 **专项修复「AI 对话在真机上 100% 不可用」的协议层致命缺陷，并补齐 ARM64 执行链路缺口**

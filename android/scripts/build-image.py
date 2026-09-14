@@ -36,7 +36,7 @@ from pathlib import Path
 # App 在手机上的最终前缀（与 AndroidManifest package 一致的绝对路径）
 FINAL_PREFIX = "/data/user/0/com.codex.mobile/files/usr"
 TERMUX_PREFIX = "/data/data/com.termux/files/usr"
-RUNTIME_VERSION = "0.6.0"
+RUNTIME_VERSION = "0.6.1"
 CODEX_VERSION = "0.104.0"  # 与 app-server 前端 UI/protocol 配套，勿随意升级
 SHARD_COUNT = 4            # 设备端并行解压线程数
 
@@ -438,14 +438,16 @@ def main():
         native.chmod(0o700)
 
     # v0.6.0：ripgrep 修正。npm 包 bin/rg 是 dotslash 引导文件（Android 无法
-    # 执行），codex-linux-arm64 vendor 里的 rg 是 glibc 链接（同样无法执行）。
-    # 引擎从 PATH 找 rg —— 用 Termux bionic 版覆盖包内副本，双保险。
+    # 执行），codex-linux-arm64 vendor 里的 rg（codex/ 与 path/ 两处）是 glibc
+    # 链接（同样无法执行）。引擎从 PATH 找 rg —— 用 Termux bionic 版覆盖，
+    # 并清掉包内全部 glibc/dotslash 副本，防任何代码路径误用。
     bionic_rg = usr / "bin/rg"
     if bionic_rg.exists():
         bionic_rg.chmod(0o700)
         for rg_copy in (
             usr / "lib/node_modules/@openai/codex/bin/rg",
             usr / "lib/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex/rg",
+            usr / "lib/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/path/rg",
         ):
             try:
                 if rg_copy.exists() or rg_copy.is_symlink():
