@@ -26,10 +26,13 @@ class CodexServerManager(private val context: Context) {
         private const val TAG = "CodexServerManager"
         const val SERVER_PORT = 18923
         private const val PROXY_PORT = 18924
+        // chat-bridge：Responses ⇄ Chat 本地协议桥（0.104.0 引擎只讲 Responses，
+        // DeepSeek/Qwen/GLM 只讲 Chat，靠它在本地翻译）
+        private const val BRIDGE_PORT = 18925
         // 与 app-server 前端 UI/protocol 匹配的锁版本（勿随意升级）
         private const val CODEX_VERSION = "0.104.0"
         // 内置镜像版本号，与镜像内 .runtime-version 一致（v0.4 起为分片镜像）
-        private const val RUNTIME_IMAGE_VERSION = "0.4.1"
+        private const val RUNTIME_IMAGE_VERSION = "0.6.0"
         // 构建期分出的独立 gzip+tar 分片；并行解压，线程数 = 分片数
         const val IMAGE_SHARD_COUNT = 4
         private val IMAGE_SHARDS = listOf(
@@ -42,6 +45,7 @@ class CodexServerManager(private val context: Context) {
 
     private var serverProcess: Process? = null
     private var proxyProcess: Process? = null
+    private var bridgeProcess: Process? = null
 
     val isRunning: Boolean
         get() {
@@ -184,15 +188,33 @@ class CodexServerManager(private val context: Context) {
     private data class ProviderSpec(
         val id: String,
         val model: String,
+        /** 引擎直连的 base_url（写入 config.toml）。chat 型 provider 指向本地 bridge。 */
         val baseUrl: String,
         val envKey: String,
+        /** 非 null 表示纯 Chat Completions 上游，须经 chat-bridge 翻译。 */
+        val upstreamChatUrl: String? = null,
     )
 
     private val providers = listOf(
-        ProviderSpec("openai", "gpt-4.1-mini", "https://api.openai.com", "OPENAI_API_KEY"),
-        ProviderSpec("deepseek", "deepseek-chat", "https://api.deepseek.com", "DEEPSEEK_API_KEY"),
-        ProviderSpec("qwen", "qwen-plus", "https://dashscope.aliyuncs.com/compatible-mode/v1", "DASHSCOPE_API_KEY"),
-        ProviderSpec("glm", "glm-4.5", "https://open.bigmodel.cn/api/paas/v4", "ZHIPU_API_KEY"),
+        // OpenAI 原生支持 Responses API：引擎直连
+        ProviderSpec("openai", "gpt-4.1-mini", "https://api.openai.com/v1", "OPENAI_API_KEY"),
+        // DeepSeek/Qwen/GLM 只提供 Chat Completions：
+        // 0.104.0 引擎已删除 wire_api="chat"，必须经本地 chat-bridge 翻译
+        ProviderSpec(
+            "deepseek", "deepseek-chat",
+            "http://127.0.0.1:$BRIDGE_PORT/deepseek/v1", "DEEPSEEK_API_KEY",
+            "https://api.deepseek.com/v1",
+        ),
+        ProviderSpec(
+            "qwen", "qwen-plus",
+            "http://127.0.0.1:$BRIDGE_PORT/qwen/v1", "DASHSCOPE_API_KEY",
+            "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        ),
+        ProviderSpec(
+            "glm", "glm-4.5",
+            "http://127.0.0.1:$BRIDGE_PORT/glm/v1", "ZHIPU_API_KEY",
+            "https://open.bigmodel.cn/api/paas/v4",
+        ),
     )
 
     private val prefs by lazy {
@@ -208,6 +230,13 @@ class CodexServerManager(private val context: Context) {
     /**
      * 保存用户选择的 provider + API Key，并写入 Codex 配置
      * （config.toml 注册全部 provider，auth.json 写入当前 Key）。
+     *
+     * v0.6.0 修复：Codex 0.104.0 彻底移除了 wire_api="chat"，引擎只会讲
+     * Responses API。所有 provider 统一写 wire_api="responses"；纯 Chat 上游
+     * （DeepSeek/Qwen/GLM）的 base_url 指向本地 chat-bridge（:18925），由桥把
+     * Responses 翻译成 Chat Completions 转发上游。
+     * 同时修复 model 写法："provider/model" 复合串 0.104.0 无法绑定自定义
+     * provider（实测回落默认 openai），必须 model 与 model_provider 分离。
      */
     fun configureProvider(providerId: String, apiKey: String): Boolean {
         val spec = providers.firstOrNull { it.id == providerId }
@@ -226,14 +255,15 @@ class CodexServerManager(private val context: Context) {
         val toml = buildString {
             appendLine("approval_policy = \"never\"")
             appendLine("sandbox_mode = \"danger-full-access\"")
-            appendLine("model = \"${spec.id}/${spec.model}\"")
+            appendLine("model = \"${spec.model}\"")
+            appendLine("model_provider = \"${spec.id}\"")
             appendLine()
             for (p in providers) {
                 appendLine("[model_providers.${p.id}]")
                 appendLine("name = \"${p.id}\"")
                 appendLine("base_url = \"${p.baseUrl}\"")
                 appendLine("env_key = \"${p.envKey}\"")
-                appendLine("wire_api = \"chat\"")
+                appendLine("wire_api = \"responses\"")
                 appendLine()
             }
         }
@@ -242,6 +272,11 @@ class CodexServerManager(private val context: Context) {
         val authJson = """{"${spec.envKey}": "$apiKey", "OPENAI_API_KEY": "$apiKey"}"""
         File(configDir, "auth.json").writeText(authJson)
         Log.i(TAG, "Provider configured: ${spec.id} (${spec.model})")
+
+        // 选中的是纯 Chat 上游 → 确保本地协议桥已启动
+        if (spec.upstreamChatUrl != null && !startChatBridge()) {
+            Log.e(TAG, "chat-bridge failed to start; chat-only provider ${spec.id} will not work")
+        }
         return true
     }
 
@@ -268,10 +303,14 @@ class CodexServerManager(private val context: Context) {
         val env = buildEnvironment(paths).toMutableMap()
         env["HTTPS_PROXY"] = "http://127.0.0.1:$PROXY_PORT"
         env["HTTP_PROXY"] = "http://127.0.0.1:$PROXY_PORT"
+        env["NO_PROXY"] = "127.0.0.1,localhost"
 
         getConfiguredProvider()?.let { providerId ->
-            providers.firstOrNull { it.id == providerId }?.envKey?.let { envKey ->
-                getConfiguredApiKey()?.let { key -> env[envKey] = key }
+            providers.firstOrNull { it.id == providerId }?.let { spec ->
+                getConfiguredApiKey()?.let { key -> env[spec.envKey] = key }
+                if (spec.upstreamChatUrl != null && !startChatBridge()) {
+                    Log.e(TAG, "chat-bridge unavailable for provider ${spec.id}")
+                }
             }
         }
 
@@ -430,6 +469,86 @@ class CodexServerManager(private val context: Context) {
         destroyProcess(proc)
     }
 
+    // ── chat-bridge（Responses ⇄ Chat 本地协议桥） ───────────────
+
+    /**
+     * 启动本地 chat-bridge（127.0.0.1:18925）。
+     * Codex 0.104.0 只讲 Responses API；DeepSeek/Qwen/GLM 只讲 Chat
+     * Completions。桥在设备本地把两者互译（详见 assets/chat-bridge.js）。
+     * 已在运行则直接返回 true。
+     */
+    fun startChatBridge(): Boolean {
+        if (bridgeProcess != null) {
+            try {
+                bridgeProcess?.exitValue()
+                bridgeProcess = null
+            } catch (_: IllegalThreadStateException) {
+                return true
+            }
+        }
+
+        val paths = BootstrapInstaller.getPaths(context)
+        val bridgeScript = File(paths.homeDir, "chat-bridge.js")
+        try {
+            context.assets.open("chat-bridge.js").use { input ->
+                bridgeScript.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to extract chat-bridge.js asset: ${e.message}")
+            return false
+        }
+
+        val env = buildEnvironment(paths)
+        val shell = "${paths.prefixDir}/bin/sh"
+        val cmd = "exec node ${bridgeScript.absolutePath}"
+
+        val pb = ProcessBuilder(shell, "-c", cmd)
+        pb.environment().clear()
+        pb.environment().putAll(env)
+        pb.directory(File(paths.homeDir))
+        pb.redirectErrorStream(true)
+
+        val proc = try {
+            pb.start()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start chat-bridge: ${e.message}")
+            return false
+        }
+        bridgeProcess = proc
+
+        Thread {
+            val reader = BufferedReader(InputStreamReader(proc.inputStream))
+            var line = reader.readLine()
+            while (line != null) {
+                Log.d(TAG, "[bridge] $line")
+                line = reader.readLine()
+            }
+            Log.i(TAG, "chat-bridge exited with code: ${proc.waitFor()}")
+            if (bridgeProcess === proc) bridgeProcess = null
+        }.start()
+
+        val deadline = System.currentTimeMillis() + 5_000
+        while (System.currentTimeMillis() < deadline) {
+            if (isPortOpen("127.0.0.1", BRIDGE_PORT)) {
+                Log.i(TAG, "chat-bridge started on 127.0.0.1:$BRIDGE_PORT")
+                return true
+            }
+            Thread.sleep(200)
+        }
+        Log.e(TAG, "chat-bridge did not listen on 127.0.0.1:$BRIDGE_PORT within 5s")
+        destroyProcess(proc)
+        bridgeProcess = null
+        return false
+    }
+
+    fun stopChatBridge() {
+        val proc = bridgeProcess ?: return
+        bridgeProcess = null
+        destroyProcess(proc)
+    }
+
     // ── Server lifecycle ────────────────────────────────────────
 
     /**
@@ -446,10 +565,16 @@ class CodexServerManager(private val context: Context) {
         val env = buildEnvironment(paths).toMutableMap()
         env["HTTPS_PROXY"] = "http://127.0.0.1:$PROXY_PORT"
         env["HTTP_PROXY"] = "http://127.0.0.1:$PROXY_PORT"
+        // 本地服务（工作台/引擎/chat-bridge）绝不能被 CONNECT 代理劫持
+        env["NO_PROXY"] = "127.0.0.1,localhost"
 
         getConfiguredProvider()?.let { providerId ->
-            providers.firstOrNull { it.id == providerId }?.envKey?.let { envKey ->
-                getConfiguredApiKey()?.let { key -> env[envKey] = key }
+            providers.firstOrNull { it.id == providerId }?.let { spec ->
+                getConfiguredApiKey()?.let { key -> env[spec.envKey] = key }
+                // chat 型 provider：先确保协议桥在跑（工作台会话经引擎→桥→上游）
+                if (spec.upstreamChatUrl != null && !startChatBridge()) {
+                    Log.e(TAG, "chat-bridge unavailable for provider ${spec.id}")
+                }
             }
         }
 
@@ -520,6 +645,7 @@ class CodexServerManager(private val context: Context) {
         // 无上限 waitFor 会造成 ANR。
         destroyProcess(proc)
 
+        stopChatBridge()
         stopProxy()
         Log.i(TAG, "Server stopped")
     }
@@ -585,6 +711,8 @@ class CodexServerManager(private val context: Context) {
         env["GIT_TEMPLATE_DIR"] = "${paths.prefixDir}/share/git-core/templates"
         env["OPENSSL_CONF"] = "${paths.prefixDir}/etc/tls/openssl.cnf"
         env["NODE_OPTIONS"] = "--openssl-config=${paths.prefixDir}/etc/tls/openssl.cnf --unhandled-rejections=warn"
+        // 本地回环服务（工作台 18923 / chat-bridge 18925）不走 CONNECT 代理
+        env["NO_PROXY"] = "127.0.0.1,localhost"
         env["CONTAINER"] = "1"
         return env
     }

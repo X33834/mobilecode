@@ -21,20 +21,34 @@ Key 只保存在手机本地（Android Keystore 加密），不会上传到任�
 
 ## 原理（二开参考）
 
+v0.6.0 起 Codex 引擎（0.104.0）只讲 Responses API，而 DeepSeek/Qwen/GLM 只提供
+Chat Completions。App 内置了零依赖的本地协议桥 **chat-bridge.js**
+（127.0.0.1:18925），把引擎的 Responses 请求实时翻译成 Chat 请求转发上游，
+再把上游的 Chat SSE 流翻译回 Responses 事件流：
+
+```
+codex 引擎 ──Responses──▶ chat-bridge(127.0.0.1:18925) ──Chat──▶ provider
+codex 引擎 ◀──Responses SSE── chat-bridge ◀──Chat SSE── provider
+```
+
 App 会把所选服务商写进 Codex 配置：
 
 ```toml
 # ~/.codex/config.toml（App 自动生成）
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
-model = "deepseek/deepseek-chat"
+model = "deepseek-chat"
+model_provider = "deepseek"
 
 [model_providers.deepseek]
 name = "deepseek"
-base_url = "https://api.deepseek.com"
+base_url = "http://127.0.0.1:18925/deepseek/v1"   # 本地协议桥
 env_key = "DEEPSEEK_API_KEY"
-wire_api = "chat"
+wire_api = "responses"                             # 0.104.0 仅支持 responses
 ```
+
+> 注意：`wire_api = "chat"` 在 Codex 0.104.0 已被移除（加载即报错），
+> 纯 Chat 上游必须经协议桥转换，或把引擎降级到旧版本。
 
 对应密钥写入 `~/.codex/auth.json`，并在启动工作台时注入环境变量。
 

@@ -36,9 +36,13 @@ from pathlib import Path
 # App 在手机上的最终前缀（与 AndroidManifest package 一致的绝对路径）
 FINAL_PREFIX = "/data/user/0/com.codex.mobile/files/usr"
 TERMUX_PREFIX = "/data/data/com.termux/files/usr"
-RUNTIME_VERSION = "0.4.1"
+RUNTIME_VERSION = "0.6.0"
 CODEX_VERSION = "0.104.0"  # 与 app-server 前端 UI/protocol 配套，勿随意升级
 SHARD_COUNT = 4            # 设备端并行解压线程数
+
+# 工作台运行依赖（codex-web-local 的 dist-cli 需要，但 bundle 未自带 node_modules）：
+# 构建机用系统 npm --omit=dev 安装，纯 JS 无平台产物
+WORKBENCH_RUNTIME_DEPS = ["express@5.1.0", "commander@13.1.0"]
 
 ROOT = Path(__file__).resolve().parent.parent  # android/
 ASSETS = ROOT / "app" / "src" / "main" / "assets"
@@ -74,8 +78,11 @@ BOOTSTRAP_URLS = (
        f"{BOOTSTRAP_VERSION}/bootstrap-aarch64.zip/download"]
 )
 
-# 需要内置的 Node 运行时依赖闭包（apt 索引里解析出来的最小集合）
-NODE_DEBS = ["c-ares", "libicu", "libsqlite", "nodejs-lts", "npm"]
+# 需要内置的运行时依赖闭包（apt 索引里解析出来的最小集合）
+# ripgrep：codex 引擎的文件搜索工具从 PATH 找 rg；npm 包里的 rg 是 dotslash
+# 引导文件、vendor 里的是 glibc 链接 —— 在 Android 上都不可执行，
+# 只有 Termux 的 bionic aarch64 版能跑
+RUNTIME_DEBS = ["c-ares", "libicu", "libsqlite", "nodejs-lts", "npm", "ripgrep"]
 
 
 # ── 小工具 ───────────────────────────────────────────────────────
@@ -343,11 +350,11 @@ def main():
         import gzip
         with gzip.open(pkg_gz, "rb") as src, open(index, "wb") as dst:
             shutil.copyfileobj(src, dst)
-    closure = deb_deps_closure(index, NODE_DEBS)
+    closure = deb_deps_closure(index, RUNTIME_DEBS)
     log(f"Node 依赖闭包: {', '.join(sorted(closure))}")
 
     debs = []
-    for pkg, fname in sorted(closure.items(), key=lambda kv: NODE_DEBS.index(kv[0]) if kv[0] in NODE_DEBS else 99):
+    for pkg, fname in sorted(closure.items(), key=lambda kv: RUNTIME_DEBS.index(kv[0]) if kv[0] in RUNTIME_DEBS else 99):
         dst = CACHE / Path(fname).name
         if not fetch_first([f"{m}/{fname}" for m in APT_MIRRORS], dst, min_size=100_000):
             raise SystemExit(f"[build-image] deb 下载失败: {fname}")
@@ -396,6 +403,22 @@ def main():
     workdir = usr / "lib/node_modules/codex-web-local"
     shutil.copytree(src_bundle, workdir)
 
+    # v0.5.0 实测：dist-cli/index.js import express/commander，但 bundle 未带
+    # node_modules —— 设备上工作台永远起不来（ERR_MODULE_NOT_FOUND）。
+    # 在构建机装齐运行依赖（纯 JS，--ignore-scripts 防平台相关钩子）。
+    log(f"安装工作台运行依赖 {WORKBENCH_RUNTIME_DEPS}…")
+    npm_exe = shutil.which("npm") or shutil.which("pnpm")
+    if not npm_exe:
+        raise SystemExit("[build-image] 构建机缺 npm/pnpm，无法安装工作台运行依赖")
+    npm_cmd = [npm_exe, "install", "--prefix", str(workdir),
+               "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund",
+               "--registry", NPM_MIRRORS[0]] + WORKBENCH_RUNTIME_DEPS
+    subprocess.run(npm_cmd, check=True,
+                   stdout=sys.stdout, stderr=sys.stderr, timeout=600)
+    if not (workdir / "node_modules/express/package.json").exists() or \
+       not (workdir / "node_modules/commander/package.json").exists():
+        raise SystemExit("[build-image] 工作台运行依赖安装不完整")
+
     log("写包装脚本…")
     # node 本体保持 deb 解出的真实二进制，不做包装
     node_bin = usr / "bin/node"
@@ -413,6 +436,27 @@ def main():
     native = usr / "lib/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex/codex"
     if native.exists():
         native.chmod(0o700)
+
+    # v0.6.0：ripgrep 修正。npm 包 bin/rg 是 dotslash 引导文件（Android 无法
+    # 执行），codex-linux-arm64 vendor 里的 rg 是 glibc 链接（同样无法执行）。
+    # 引擎从 PATH 找 rg —— 用 Termux bionic 版覆盖包内副本，双保险。
+    bionic_rg = usr / "bin/rg"
+    if bionic_rg.exists():
+        bionic_rg.chmod(0o700)
+        for rg_copy in (
+            usr / "lib/node_modules/@openai/codex/bin/rg",
+            usr / "lib/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex/rg",
+        ):
+            try:
+                if rg_copy.exists() or rg_copy.is_symlink():
+                    rg_copy.unlink()
+                shutil.copy2(bionic_rg, rg_copy)
+                rg_copy.chmod(0o700)
+                log(f"rg 覆盖: {rg_copy.relative_to(usr)}")
+            except OSError:
+                pass
+    else:
+        raise SystemExit("[build-image] Termux ripgrep 未解出（bin/rg 缺失）")
     rg_js = usr / "lib/node_modules/@openai/codex/bin/rg"
     if rg_js.exists():
         rg_js.chmod(0o700)
@@ -436,6 +480,16 @@ def main():
 
     # 5. 瘦身：成品镜像不可再装包，移除包管理器/孤儿库簇/info 文档
     slim_image(usr)
+
+    # 5b. 清理悬空符号链接（slim 删除库文件后留下的死链；
+    #     v0.5.0 实测 libnettle.so.8 / libhogweed.so / bin/xdg-open 悬空）
+    dangling = 0
+    for p in list(usr.rglob("*")):
+        if p.is_symlink() and not p.exists():
+            p.unlink()
+            dangling += 1
+    log(f"清理悬空符号链接 {dangling} 个")
+
     # 瘦身后做一次动态依赖完整性校验（防止误删被引用库）
     verify_image_deps(usr)
 
@@ -456,9 +510,12 @@ def main():
         "usr/bin/sh",
         "usr/bin/node",
         "usr/bin/codex",
+        "usr/bin/rg",
         "usr/lib/node_modules/@openai/codex/bin/codex.js",
         "usr/lib/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex/codex",
         "usr/lib/node_modules/codex-web-local/dist-cli/index.js",
+        "usr/lib/node_modules/codex-web-local/node_modules/express/package.json",
+        "usr/lib/node_modules/codex-web-local/node_modules/commander/package.json",
         "usr/.runtime-version",
     ]
     found = set()
@@ -567,7 +624,7 @@ def verify_image_deps(usr: Path):
     }
     lib_names = {p.name for p in (usr / "lib").glob("lib*.so*")}
     problems = []
-    for probe in ("bin/sh", "bin/node", "bin/bash", "bin/curl"):
+    for probe in ("bin/sh", "bin/node", "bin/bash", "bin/curl", "bin/rg"):
         p = usr / probe
         if not p.exists():
             continue

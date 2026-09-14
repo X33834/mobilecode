@@ -1,5 +1,50 @@
 # 更新日志
 
+## [v0.6.0] - 2026-09-14
+
+**专项修复「AI 对话在真机上 100% 不可用」的协议层致命缺陷，并补齐 ARM64 执行链路缺口**
+（全部修复均在 qemu-aarch64 模拟 Android 环境中端到端实测验证，含真实工具调用循环）：
+
+### 模型协议层致命修复（重点）
+
+- **`wire_api = "chat"` 已被引擎移除（对话 100% 报错的根因）**：Codex 0.104.0 彻底删除了
+  Chat Completions 协议支持，加载 `wire_api="chat"` 配置直接报错
+  `wire_api = "chat" is no longer supported` —— 而 v0.5.0 及之前 `configureProvider()` 给全部
+  4 个 provider 写的都是 `"chat"`，即装好后选任何服务商都无法对话。
+  修复：① 新增零依赖本地协议桥 **`chat-bridge.js`**（`assets/`，监听 `127.0.0.1:18925`），
+  把引擎的 Responses 请求实时翻译成 Chat Completions 转发上游，再把上游 Chat SSE 流翻译回
+  Responses 事件流（含 `function_call` 工具调用双向翻译）；DeepSeek / Qwen / GLM 三个纯 Chat
+  上游统一经桥接入。② 全部 provider 写 `wire_api = "responses"`；OpenAI（原生 Responses）引擎直连。
+  实测：qemu ARM64 引擎 → bridge → mock(chat) → 引擎真实执行 `echo` 工具 → 结果回传 → 最终回答，
+  完整智能体循环跑通。
+- **`model = "provider/model"` 复合串无法绑定自定义 provider**：0.104.0 不解析该写法，静默回落
+  默认 OpenAI provider（实测：`provider: openai`、请求打到 `api.openai.com`）。改为
+  `model` 与 `model_provider` 分离写法。
+- **`base_url` 缺 `/v1` 后缀**：原配置 `https://api.openai.com` 会请求到 `/responses`（404）。
+  已统一补全版本段。
+- **本地回环被 CONNECT 代理劫持**：引擎/工作台对 `127.0.0.1:18925`（协议桥）的请求默认会走
+  `HTTPS_PROXY`。全部进程环境注入 `NO_PROXY=127.0.0.1,localhost`。
+
+### ARM64 执行链路缺口补齐（六层逐层体检发现）
+
+- **ripgrep 在 Android 上不可执行（文件搜索工具瘫痪）**：codex npm 包内的 `bin/rg` 是 dotslash
+  引导文件（Android 无法执行）、`codex-linux-arm64/vendor/.../rg` 是 glibc 链接（Android 无
+  glibc）。镜像新增 Termux bionic aarch64 ripgrep（含 pcre2 依赖闭包），并覆盖包内两处 rg 副本。
+- **工作台缺运行依赖（工作台永远起不来）**：`codex-web-local/dist-cli/index.js` 依赖
+  `express`/`commander`，但 bundle 未带 node_modules —— 设备上启动即 `ERR_MODULE_NOT_FOUND`。
+  `build-image.py` 构建期安装（`--omit=dev --ignore-scripts`，纯 JS 无平台产物）。
+- **3 个悬空符号链接**（`libnettle.so.8` / `libhogweed.so` / `bin/xdg-open`）：瘦身删库后残留死链，
+  现构建尾全树扫描清理。
+- 镜像重建：4 分片共 85.3 MB（4141 个文件），`.runtime-version 0.6.0`（设备端检测到版本变化自动
+  一次性重装），瘦身后动态依赖校验通过。
+- **验证方式**：qemu-aarch64 + glibc sysroot 模拟 Android 用户态，四条链路全部实测通过：
+  引擎启动/配置解析、镜像 4 分片解压、工作台开箱启动（HTTP 200，仅绑 127.0.0.1）、
+  mock(responses) 直连与 mock(chat) 经桥两条完整工具调用循环。
+
+### 其它
+
+- versionCode 12 → 13，versionName 0.6.0；`docs/domestic-models.md` 原理说明同步更新。
+
 ## [v0.5.0] - 2026-09-14
 
 **专项修复「APK 装不上 / 构建不出来」，并做一轮安全加固**（对 release APK 二进制做逆向级检查后定位）：

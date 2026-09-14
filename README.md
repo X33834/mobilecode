@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/version-0.5.0-blue" alt="Version 0.5.0"></a>
+  <a href="#"><img src="https://img.shields.io/badge/version-0.6.0-blue" alt="Version 0.5.0"></a>
   <a href="#"><img src="https://img.shields.io/badge/platform-Android%207.0%2B%20(ARM64)-green" alt="Platform"></a>
   <a href="#"><img src="https://img.shields.io/badge/language-EN%20%7C%20%E4%B8%AD%E6%96%87-orange" alt="Language"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-lightgrey" alt="License"></a>
@@ -73,7 +73,7 @@ network your device needs is the one API call to your chosen model provider.
 
 1. **Download the APK**
 
-   Latest release: [`release/Mobilecode-v0.5.0-release.apk`](release/Mobilecode-v0.5.0-release.apk) (~90 MB)
+   Latest release: [`release/Mobilecode-v0.6.0-release.apk`](release/Mobilecode-v0.6.0-release.apk) (~90 MB)
 
 2. **Install**
 
@@ -132,7 +132,7 @@ python3 scripts/build-image.py
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        Android APK (v0.5.0)                      │
+│                        Android APK (v0.6.0)                      │
 │                                                                 │
 │  ┌──────────────────────┐        ┌───────────────────────────┐  │
 │  │      WebView UI      │        │  MainActivity             │  │
