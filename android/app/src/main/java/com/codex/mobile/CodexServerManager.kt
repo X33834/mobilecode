@@ -315,8 +315,26 @@ class CodexServerManager(private val context: Context) {
         }
 
         Log.e(TAG, "Health check timed out after ${timeoutMs}ms — killing")
-        try { proc.destroy() } catch (_: Exception) {}
+        destroyProcess(proc)
         return false
+    }
+
+    /**
+     * 销毁子进程：先 SIGTERM 优雅退出，最多等 [timeoutMs]；
+     * 超时则 SIGKILL 强杀。node 收到 SIGTERM 默认直接退出，
+     * 但卡在不可中断 IO 时只能强杀，否则进程残留占着 18923/18924 端口，
+     * 下次启动 EADDRINUSE 反复失败（重启手机才能恢复）。
+     */
+    private fun destroyProcess(proc: Process, timeoutMs: Long = 3_000) {
+        try {
+            proc.destroy()
+            if (!proc.waitFor(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+                proc.destroyForcibly()
+                proc.waitFor(2_000, java.util.concurrent.TimeUnit.MILLISECONDS)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "destroyProcess: ${e.message}")
+        }
     }
 
     // ── Proxy（原生二进制的 DNS/TLS 桥） ─────────────────────────
@@ -407,8 +425,9 @@ class CodexServerManager(private val context: Context) {
     }
 
     fun stopProxy() {
-        proxyProcess?.destroy()
+        val proc = proxyProcess ?: return
         proxyProcess = null
+        destroyProcess(proc)
     }
 
     // ── Server lifecycle ────────────────────────────────────────
@@ -497,17 +516,9 @@ class CodexServerManager(private val context: Context) {
         val proc = serverProcess ?: return
         serverProcess = null
 
-        try {
-            proc.destroy()
-        } catch (e: Exception) {
-            Log.w(TAG, "Error destroying server process: ${e.message}")
-        }
-
-        try {
-            proc.waitFor()
-        } catch (_: InterruptedException) {
-            Thread.currentThread().interrupt()
-        }
+        // destroyProcess 带超时：本方法会在 Activity.onDestroy（主线程）被调，
+        // 无上限 waitFor 会造成 ANR。
+        destroyProcess(proc)
 
         stopProxy()
         Log.i(TAG, "Server stopped")

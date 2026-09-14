@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/version-0.4.1-blue" alt="版本 0.4.1"></a>
+  <a href="#"><img src="https://img.shields.io/badge/version-0.5.0-blue" alt="版本 0.5.0"></a>
   <a href="#"><img src="https://img.shields.io/badge/platform-Android%207.0%2B%20(ARM64)-green" alt="平台"></a>
   <a href="#"><img src="https://img.shields.io/badge/language-EN%20%7C%20%E4%B8%AD%E6%96%87-orange" alt="语言"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-lightgrey" alt="许可证"></a>
@@ -73,7 +73,7 @@ Mobilecode 是一个**安卓端的 AI 编程工作台**。APK 内置了完整的
 
 1. **下载 APK**
 
-   最新版：[`release/Mobilecode-v0.4.1-debug.apk`](release/Mobilecode-v0.4.1-debug.apk)（约 90 MB）
+   最新版：[`release/Mobilecode-v0.5.0-release.apk`](release/Mobilecode-v0.5.0-release.apk)（约 90 MB）
 
 2. **安装**
 
@@ -130,7 +130,7 @@ python3 scripts/build-image.py
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                       Android APK（v0.4.1）                      │
+│                       Android APK（v0.5.0）                      │
 │                                                                 │
 │  ┌──────────────────────┐        ┌───────────────────────────┐  │
 │  │      WebView 界面     │        │  MainActivity             │  │
@@ -201,20 +201,21 @@ mobilecode-repo/
 └── android/                ← 精选源码镜像（完整源码见 openclaw-android）
 ```
 
+## 常见问题
+
+| 现象 | 处理 |
+| --- | --- |
+| **APK 提示「无法安装 / 应用未安装」** | ① 手机上装过 v0.4.x 旧版？**先卸载旧版再装 v0.5.0+**（旧版是另一套 debug 证书签名，签名不一致系统会拒绝升级）；② 确认系统是 Android 7.0+ 且为 ARM64 芯片；③ 通过微信/QQ 传输的 APK 可能被改名或截断，建议用网关/USB 传输；④ MIUI：设置→开发者选项→打开「USB 安装」。v0.5.0 起 APK 使用正式证书 + v2/v3 签名方案（旧版为 debug 证书），且 debug/release 统一证书，安装兼容性已最大化。 |
+| 打开提示「内置运行环境解压失败」 | 点「重试」；仍失败则进 **⚙ → 诊断与环境** 查看存储剩余（需 >500 MB），点「重置环境」。 |
+| 每次启动都重新解压环境 | 版本失配：镜像内 `.runtime-version` 必须等于 `CodexServerManager.kt` 的 `RUNTIME_IMAGE_VERSION`。用 `build-image.py` 重建镜像（v0.4.1 起两者一致）。 |
+| 换机器 Gradle 构建失败 | v0.5.0 起仓库不再携带构建机专属配置：只需 JDK 17 + Android SDK（`android/local.properties` 写 `sdk.dir`）。国内网络已内置阿里云 Maven 镜像与 Gradle 腾讯镜像，无需代理。 |
+| 工作台起来了但 API 调用失败 | 检查 ⚙ 里的 Key，确认设备能访问对应服务商接口。 |
+
 ## 运行要求
 
 - Android 7.0（API 24）及以上，**ARM64** 设备
 - 约 500 MB 可用存储
 - 仅调用模型 API 需联网（构建镜像时也需联网）
-
-## 常见问题
-
-| 现象 | 处理 |
-| --- | --- |
-| 打开提示「内置运行环境解压失败」 | 点「重试」；仍失败则进 **⚙ → 诊断与环境** 查看存储剩余（需 >500 MB），点「重置环境」。 |
-| 每次启动都重新解压环境 | 版本失配：镜像内 `.runtime-version` 必须等于 `CodexServerManager.kt` 的 `RUNTIME_IMAGE_VERSION`。用 `build-image.py` 重建镜像（v0.4.1 起两者一致）。 |
-| 换机器 Gradle 构建失败 | `android/gradle.properties` 里是本沙箱专用的 `systemProp.http.proxy*` 与 `org.gradle.java.home` —— 删掉/改成你本机的 JDK 17 路径。 |
-| 工作台起来了但 API 调用失败 | 检查 ⚙ 里的 Key，确认设备能访问对应服务商接口。 |
 
 ## 路线图与文档
 

@@ -60,10 +60,19 @@ NPM_MIRRORS = [
     "https://registry.npmjs.org",
 ]
 BOOTSTRAP_VERSION = "bootstrap-2026.02.12-r1+apt.android-7"
-BOOTSTRAP_URLS = [
-    f"https://github.com/termux/termux-packages/releases/download/{BOOTSTRAP_VERSION}/bootstrap-aarch64.zip",
-    f"https://sourceforge.net/projects/termux-packages.mirror/files/{BOOTSTRAP_VERSION}/bootstrap-aarch64.zip/download",
-]
+_GH_RELEASE = (
+    "https://github.com/termux/termux-packages/releases/download/"
+    f"{BOOTSTRAP_VERSION}/bootstrap-aarch64.zip"
+)
+# 国内网络直连 github.com 常年不稳定：官方源 + 常见加速代理逐个尝试，
+# 任一成功即用（代理只做字节转发，zip 完整性由解压与后续校验兜底）。
+_GH_PROXIES = ["https://ghproxy.net/", "https://gh-proxy.com/", "https://ghfast.top/"]
+BOOTSTRAP_URLS = (
+    [p + _GH_RELEASE for p in _GH_PROXIES]
+    + [_GH_RELEASE,
+       "https://sourceforge.net/projects/termux-packages.mirror/files/"
+       f"{BOOTSTRAP_VERSION}/bootstrap-aarch64.zip/download"]
+)
 
 # 需要内置的 Node 运行时依赖闭包（apt 索引里解析出来的最小集合）
 NODE_DEBS = ["c-ares", "libicu", "libsqlite", "nodejs-lts", "npm"]
@@ -180,10 +189,18 @@ def extract_deb(deb: Path, dest: Path):
     data = members.get("data.tar.xz") or members.get("data.tar.zst")
     if data is None:
         raise SystemExit(f"[build-image] deb 缺少 data.tar: {deb}")
-    bio = io.BytesIO(data)
     if data[:6] == b"\xfd7zXZ\x00":
         import lzma
         bio = io.BytesIO(lzma.decompress(data))
+    elif data[:4] == b"\x28\xb5\x2f\xfd":
+        # Termux 新包逐步切 zstd；Python 3.11 标准库无 zstd，回退系统 zstd 命令
+        import subprocess as _sp
+        p = _sp.run(["zstd", "-dc"], input=data, capture_output=True, timeout=300)
+        if p.returncode != 0:
+            raise SystemExit(f"[build-image] zstd 解压失败（需系统安装 zstd）: {deb}")
+        bio = io.BytesIO(p.stdout)
+    else:
+        raise SystemExit(f"[build-image] 未知的 data.tar 压缩格式: {deb}")
     with tarfile.open(fileobj=bio, mode="r:") as tf:
         _safe_extract(tf, dest)
 

@@ -164,7 +164,25 @@ class MainActivity : AppCompatActivity() {
             override fun shouldOverrideUrlLoading(
                 view: WebView,
                 url: String,
-            ): Boolean = false
+            ): Boolean {
+                // 本地工作台留在内嵌 WebView；外部链接交给系统浏览器，
+                // 避免用户被困在 WebView 里回不去工作台。
+                val isLocal = url.startsWith("http://127.0.0.1") ||
+                    url.startsWith("http://localhost")
+                if (!isLocal) {
+                    try {
+                        startActivity(
+                            Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            },
+                        )
+                    } catch (e: Exception) {
+                        Log.w(TAG, "No browser for $url: ${e.message}")
+                    }
+                    return true
+                }
+                return false
+            }
         }
 
         webView.webChromeClient = object : WebChromeClient() {

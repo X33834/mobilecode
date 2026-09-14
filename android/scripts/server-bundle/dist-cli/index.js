@@ -601,7 +601,11 @@ if (opts.password === false) {
 }
 var { app, dispose } = createServer({ password });
 var server = createServer2(app);
-server.listen(port, () => {
+// 安全修复：必须绑定 127.0.0.1。Node 的 server.listen(port) 默认监听
+// 全部网卡（::），会把 --no-password 的工作台暴露给同一 Wi-Fi 下的所有
+// 设备（等于局域网内任意命令执行）。DESIGN.md 契约：仅回环可访问。
+var BIND_HOST = "127.0.0.1";
+server.listen(port, BIND_HOST, () => {
   const lines = [
     "",
     "Codex Web Local is running!",

@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/version-0.4.1-blue" alt="Version 0.4.1"></a>
+  <a href="#"><img src="https://img.shields.io/badge/version-0.5.0-blue" alt="Version 0.5.0"></a>
   <a href="#"><img src="https://img.shields.io/badge/platform-Android%207.0%2B%20(ARM64)-green" alt="Platform"></a>
   <a href="#"><img src="https://img.shields.io/badge/language-EN%20%7C%20%E4%B8%AD%E6%96%87-orange" alt="Language"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-lightgrey" alt="License"></a>
@@ -73,7 +73,7 @@ network your device needs is the one API call to your chosen model provider.
 
 1. **Download the APK**
 
-   Latest release: [`release/Mobilecode-v0.4.1-debug.apk`](release/Mobilecode-v0.4.1-debug.apk) (~90 MB)
+   Latest release: [`release/Mobilecode-v0.5.0-release.apk`](release/Mobilecode-v0.5.0-release.apk) (~90 MB)
 
 2. **Install**
 
@@ -132,7 +132,7 @@ python3 scripts/build-image.py
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        Android APK (v0.4.1)                      │
+│                        Android APK (v0.5.0)                      │
 │                                                                 │
 │  ┌──────────────────────┐        ┌───────────────────────────┐  │
 │  │      WebView UI      │        │  MainActivity             │  │
@@ -215,9 +215,10 @@ mobilecode-repo/
 
 | Symptom | Fix |
 | --- | --- |
+| **"App not installed" / install fails** | ① Had a v0.4.x build installed? **Uninstall it first** — older releases were signed with a different debug certificate, so the system refuses a signature-mismatch upgrade. ② Make sure the device is Android 7.0+ on ARM64. ③ APKs transferred via WeChat/QQ may be renamed or truncated — use USB/cloud storage instead. ④ On MIUI enable Developer options → "Install via USB". Since v0.5.0 the APK is signed with a dedicated release certificate (v2+v3 schemes, same cert for debug and release builds) for maximum installer compatibility. |
 | “Environment extraction failed” on launch | Tap **Retry**; if it repeats, open **⚙ → Diagnostics & Environment** to check free storage (>500 MB) and tap **Reset environment**. |
 | App re-extracts the environment on every launch | Version mismatch: the built-in image `.runtime-version` must equal `RUNTIME_IMAGE_VERSION` in `CodexServerManager.kt`. Rebuild the image with `build-image.py` (v0.4.1+ aligns both). |
-| Gradle build fails on another machine | `android/gradle.properties` contains sandbox-specific `systemProp.http.proxy*` and `org.gradle.java.home` — remove/adapt those lines; use a real JDK 17. |
+| Gradle build fails on another machine | Since v0.5.0 the repo no longer carries machine-specific config: you only need JDK 17 + Android SDK (`sdk.dir` in `android/local.properties`). Aliyun Maven mirrors and the Tencent Gradle mirror are built in — no proxy needed in mainland China. |
 | Workspace starts but API calls fail | Check the key in ⚙ settings and that the device can reach the provider endpoint. |
 
 ## Roadmap & Docs
