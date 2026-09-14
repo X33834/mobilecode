@@ -1,4 +1,4 @@
-/*! Mobilecode workbench patch v0.7.0
+/*! Mobilecode workbench patch v0.7.1
  * 注入层前端补丁（不修改上游 bundle，升级可平移）：
  *  1. fetch 劫持：解新装用户"目录下拉死锁"（thread/list 为空时注入引导会话，
  *     __mc_welcome__ 替身的首条消息在后台真实 thread/start + turn/start）
@@ -166,8 +166,14 @@
   }
 
   function renderMarkdown(elm) {
-    if (elm.dataset.mcMd === '1') return;
+    // 只渲染 assistant 消息：用户消息永远原样显示（防止误改用户原意，
+    // 如字面 **bold** 被替换为粗体；业界惯例同 ChatGPT/Claude）
+    var roleLi = elm.closest ? elm.closest('li[data-role]') : null;
+    if (roleLi && roleLi.getAttribute('data-role') !== 'assistant') return;
     var text = elm.textContent || '';
+    // 幂等 + 流式重渲染：textContent 长度变化（Vue delta 追加）时重新渲染
+    var prevLen = parseInt(elm.dataset.mcMdLen || '-1', 10);
+    if (elm.dataset.mcMd === '1' && prevLen === text.length) return;
     if (!looksLikeMarkdown(text)) return;
     try {
       var raw = window.marked ? window.marked.parse(text) : null;
@@ -176,6 +182,12 @@
       elm.innerHTML = clean;
       elm.classList.add('mc-md');
       elm.dataset.mcMd = '1';
+      elm.dataset.mcMdLen = String(elm.textContent.length);
+      // 链接加固：新窗口 + noopener（真机另有 Kotlin shouldOverrideUrlLoading 兜底）
+      elm.querySelectorAll('a[href]').forEach(function (a) {
+        a.setAttribute('target', '_blank');
+        a.setAttribute('rel', 'noopener noreferrer nofollow');
+      });
       if (window.hljs) {
         elm.querySelectorAll('pre code').forEach(function (b) {
           try { window.hljs.highlightElement(b); } catch (e) { /* 忽略高亮失败 */ }
@@ -309,12 +321,17 @@
 
   function startSse() {
     var es = new EventSource('/codex-api/events');
+    var turnActive = false;   // turn/started → turn/completed 之间
+    var turnGotReply = false; // 本轮是否收到过 agentMessage
     es.onmessage = function (ev) {
       var d;
       try { d = JSON.parse(ev.data); } catch (e) { return; }
       var m = d.method || '';
       var it = (d.params && d.params.item) || null;
-      if ((m === 'item/started' || m === 'item/completed') && it &&
+      if (m === 'turn/started') {
+        turnActive = true;
+        turnGotReply = false;
+      } else if ((m === 'item/started' || m === 'item/completed') && it &&
           it.type === 'commandExecution') {
         pushActivity({
           id: it.id,
@@ -324,12 +341,63 @@
           output: it.aggregatedOutput || ''
         });
       } else if (m === 'item/agentMessage/delta') {
+        turnGotReply = true;
         pushActivity({ id: '__stream__', command: '（模型回复生成中…）', status: 'inProgress' });
-        var t = setTimeout(function () { pushActivity({ id: '__stream__', status: 'done', command: '（回复完成）' }); }, 2500);
+        setTimeout(function () { pushActivity({ id: '__stream__', status: 'done', command: '（回复完成）' }); }, 2500);
+      } else if ((m === 'item/completed') && it && it.type === 'agentMessage' && it.text) {
+        turnGotReply = true;
       } else if (m === 'turn/completed') {
         pushActivity({ id: '__stream__', status: 'done', command: '（回合完成）' });
+        // 上游前端不消费任何失败事件（bundle 逆向 0 处 turn/failed 处理）：
+        // 引擎 StreamErrorEvent/TurnError 后 UI 完全静默，这里做兜底提示
+        var p = d.params || {};
+        var failHint = p.error || p.failure || p.errorMessage ||
+          (p.turn && (p.turn.error || p.turn.failure || p.turn.status === 'failed'));
+        if (failHint) {
+          showBanner('回合执行失败：' + String(failHint).slice(0, 120), 'bad');
+        } else if (turnActive && !turnGotReply) {
+          showBanner('回合已结束，但未收到任何回复——请检查网络连接与 API Key 是否有效', 'bad');
+        }
+        turnActive = false;
       }
     };
+    es.onerror = function () {
+      if (es.readyState === EventSource.CLOSED) {
+        showBanner('与本地服务连接中断，正在重连…（若长时间无响应请重启 App）', 'warn');
+      }
+    };
+    es.onopen = function () {
+      hideBanner('conn');
+    };
+  }
+
+  /* ───────────────────────── 全局提示条（错误/断连反馈） ───────────────────────── */
+
+  function buildBanner() {
+    var b = document.createElement('div');
+    b.id = 'mc-banner';
+    b.hidden = true;
+    b.innerHTML = '<span id="mc-banner-text"></span>' +
+      '<button id="mc-banner-close" aria-label="关闭">×</button>';
+    document.body.appendChild(b);
+    b.querySelector('#mc-banner-close').addEventListener('click', function () {
+      b.hidden = true;
+    });
+  }
+
+  function showBanner(text, kind, key) {
+    var b = document.querySelector('#mc-banner');
+    if (!b) buildBanner();
+    b = document.querySelector('#mc-banner');
+    b.className = kind === 'bad' ? 'mc-banner-bad' : 'mc-banner-warn';
+    b.dataset.key = key || '';
+    b.querySelector('#mc-banner-text').textContent = text;
+    b.hidden = false;
+  }
+
+  function hideBanner(key) {
+    var b = document.querySelector('#mc-banner');
+    if (b && b.hidden !== true && (!key || b.dataset.key === key)) b.hidden = true;
   }
 
   /* ───────────────────────── 移动端导航（汉堡按钮） ───────────────────────── */
@@ -364,9 +432,21 @@
     }
     buildNav();
     buildActivityPanel();
+    buildBanner();
     startObserver();
     startSse();
+    // 跨断点清抽屉状态：移动端开的抽屉在切回桌面（转屏/分屏）时残留
+    // 会变成全屏遮罩且汉堡已隐藏，无入口关闭
+    var mqMobile = window.matchMedia('(max-width: 767px)');
+    function onBreakpoint(e) {
+      if (!e.matches) document.body.classList.remove('mc-nav-open');
+    }
+    if (mqMobile.addEventListener) mqMobile.addEventListener('change', onBreakpoint);
+    else if (mqMobile.addListener) mqMobile.addListener(onBreakpoint);
   }
+
+  // 调试/诊断句柄（App 端诊断中心或远程排查用）
+  window.__MC_DEBUG__ = { showBanner: showBanner, hideBanner: hideBanner, pushActivity: pushActivity };
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', boot);

@@ -1,5 +1,36 @@
 # 更新日志
 
+## [v0.7.1] - 2026-09-14
+
+**二轮深挖：以挑刺视角对前端细节与大使用场景实测，抓出 4 个 v0.7.0 补丁/上游遗留缺陷并全部修复**
+
+### 深挖发现与修复（全部浏览器实测取证）
+
+- **修复：用户消息被 markdown 误渲染**（v0.7.0 补丁自伤）。`renderMarkdown` 此前扫所有
+  `.message-text`，用户字面输入 `**粗体**`/`- 列表` 会被替换为 HTML 改变原意。现以
+  `li[data-role]` 区分角色，**只渲染 assistant 消息，用户消息永远原样显示**（同 ChatGPT/Claude
+  惯例）；顺带修复流式输出场景（delta 追加后按长度变化重渲染，不再一次性锁定），
+  并对渲染出的链接强制 `target=_blank + rel=noopener noreferrer nofollow`（真机另有
+  Kotlin shouldOverrideUrlLoading 兜底）。
+- **修复：移动端抽屉状态跨断点残留**（v0.7.0 补丁边界）。手机上展开抽屉后转横屏/分屏
+  跨过 768px，全屏遮罩残留且汉堡按钮已隐藏、无入口关闭。现用 `matchMedia` 断点监听，
+  离开移动断点自动复位。
+- **修复：暗色模式完全不支持**（上游缺陷实锤：CSS/JS 0 处 prefers-color-scheme，
+  layout 写死亮色而 body 是 slate-950，真机 App 框架暗、内容永远刺眼亮白）。补丁层
+  系统暗色适配：layout/主区两层纯白容器/content-header/composer 壳/侧栏/消息卡/代码块
+  关键面覆盖，随系统自动切换，暗色与亮色双截图回归通过。
+- **修复：turn 失败完全静默**（上游缺陷：引擎有 StreamErrorEvent/TurnError/TurnAbortedEvent
+  能力，前端 bundle 0 处消费）。补丁新增全局提示条 `#mc-banner`：订阅 SSE 监测
+  turn/completed 无回复 / 失败载荷 / EventSource 断连三类异常并给出中文提示与关闭按钮；
+  另暴露 `window.__MC_DEBUG__` 诊断句柄。
+- **实测通过项**（未发现问题）：XSS 防御（`<img onerror>`/`<script>`/`<iframe>`/
+  `javascript:` 链接全部被 DOMPurify 拦截，零触发）；长会话渲染性能（200 条 md 消息
+  3 秒内全部渲染，rAF 节流 + 幂等标记工作正常）。
+
+### 其它
+
+- versionCode 15 → 16，versionName 0.7.1。
+
 ## [v0.7.0] - 2026-09-14
 
 **工作台前端 P0/P1 修复：以「注入层补丁」架构在不改动上游 bundle 的前提下，修复新装死锁与移动端不可用两大 P0，补齐 markdown 渲染、工具过程透明度与中文化**

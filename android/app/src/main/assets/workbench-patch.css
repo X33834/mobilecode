@@ -1,4 +1,4 @@
-/*! Mobilecode workbench patch css v0.7.0（移动端适配 + markdown 样式 + 工具浮层） */
+/*! Mobilecode workbench patch css v0.7.1（移动端适配 + markdown 样式 + 工具浮层） */
 
 /* ── 移动端：侧栏抽屉化（<768px），桌面不受影响 ── */
 @media (max-width: 767px) {
@@ -225,4 +225,92 @@ body.mc-nav-open #mc-nav-backdrop {
   opacity: 0.6;
   padding: 8px;
   text-align: center;
+}
+
+/* ── 全局提示条（turn 失败 / 断连反馈，上游无任何错误 UI 的兜底） ── */
+#mc-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #fff;
+}
+.mc-banner-bad { background: #b3261e; }
+.mc-banner-warn { background: #9a6b00; }
+#mc-banner-text { flex: 1; min-width: 0; }
+#mc-banner-close {
+  border: 0;
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  cursor: pointer;
+  flex: none;
+}
+
+/* ── 系统暗色适配（上游 layout 写死亮色，body 却是 slate-950，
+      真机上 App 框架暗、内容永远亮白割裂。此处做关键面覆盖） ── */
+@media (prefers-color-scheme: dark) {
+  .desktop-layout,
+  .desktop-layout[data-v-8b608b70] {
+    background-color: oklch(20.8% 0.042 265.755) !important; /* slate-900 */
+    color: oklch(96.8% 0.007 247.896) !important;
+  }
+  .desktop-sidebar {
+    background-color: oklch(25.7% 0.04 265.755) !important; /* slate-800 */
+    color: inherit;
+  }
+  /* 主区两层纯白容器（rgb 非 oklch，须单独覆盖） */
+  .desktop-main,
+  .content-root {
+    background-color: oklch(20.8% 0.042 265.755) !important;
+    color: oklch(93% 0.01 247.896) !important;
+  }
+  .new-thread-empty,
+  .content-body,
+  .content-grid {
+    color: oklch(93% 0.01 247.896);
+  }
+  .content-header {
+    background-color: oklch(23.3% 0.04 265.755) !important; /* slate-850 段 */
+    border-color: rgba(148, 163, 184, 0.2) !important;
+  }
+  .content-title,
+  .new-thread-hero {
+    color: oklch(93% 0.01 247.896) !important;
+  }
+  .thread-composer-shell {
+    background-color: oklch(25.7% 0.04 265.755) !important;
+  }
+  .thread-row-title {
+    color: oklch(93% 0.01 247.896) !important;
+  }
+  .message-card {
+    background-color: oklch(28% 0.035 265.755) !important;
+    color: oklch(93% 0.01 247.896) !important;
+  }
+  .thread-composer-input {
+    background-color: oklch(28% 0.035 265.755) !important;
+    color: oklch(96.8% 0.007 247.896) !important;
+    border-color: rgba(148, 163, 184, 0.3) !important;
+  }
+  .message-text.mc-md pre {
+    background: #0b0f16 !important;
+  }
+  .message-text.mc-md table th,
+  .message-text.mc-md table td {
+    border-color: rgba(148, 163, 184, 0.3) !important;
+  }
+  .message-text.mc-md blockquote {
+    border-left-color: rgba(148, 163, 184, 0.45) !important;
+    color: rgba(226, 232, 240, 0.85) !important;
+  }
 }

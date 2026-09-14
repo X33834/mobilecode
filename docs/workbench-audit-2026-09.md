@@ -90,6 +90,21 @@ thread/start → turn/start 透明映射），用户选目录、发首条消息�
 | P2 | 语音输入 | Android SpeechRecognizer → 输入框 |
 | P2 | i18n / 用量 | 顺带清理俄语残留 |
 
-## 五、一句话总结
+## 五、二轮深挖（v0.7.1，2026-09-14）
+
+v0.7.0 修复上线后，以挑刺视角对前端细节与大使用场景做二轮实测（上游断连/发消息/暗色/
+转屏/XSS 注入/200 条消息压测），新抓 4 缺陷全部修复：
+
+| # | 缺陷 | 根因 | 修复 |
+|---|---|---|---|
+| 1 | 用户消息被 markdown 误渲染，字面 `**粗体**` 被替换成粗体 | v0.7.0 补丁扫所有 `.message-text`，不分角色 | 只渲染 `li[data-role=assistant]`；用户消息永远原样；流式 delta 按长度变化重渲染；链接强制 `_blank + noopener` |
+| 2 | 抽屉跨断点残留：手机开抽屉后转横屏，全屏遮罩卡死无入口关 | mc-nav-open 类无断点复位 | matchMedia 离开移动断点自动复位 |
+| 3 | 暗色模式完全不支持（layout 写死亮色，CSS/JS 0 处 dark 逻辑） | 上游缺陷 | 补丁层 prefers-color-scheme 关键面覆盖（layout/主区白容器/header/composer/侧栏/消息卡），双模式截图回归 |
+| 4 | turn 失败完全静默：上游断连发消息，无任何错误提示，消息石沉大海 | 引擎有 StreamErrorEvent/TurnError，前端 bundle 0 处消费 | 补丁 #mc-banner 提示条：无回复/失败载荷/SSE 断连三类兜底提示 |
+
+**二轮实测通过项**：XSS 防御（img onerror/script/iframe/javascript: 全被 DOMPurify 拦截）；
+长会话性能（200 条 md 消息 3 秒渲染完，幂等 + rAF 节流有效）。
+
+## 六、一句话总结
 
 **引擎是 2026 级的，前端是 2024 级的**——两个 P0 都是小改动可解，修复后工作台即可达到当前主流 agent 产品的可用线。

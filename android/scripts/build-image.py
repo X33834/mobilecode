@@ -36,7 +36,7 @@ from pathlib import Path
 # App 在手机上的最终前缀（与 AndroidManifest package 一致的绝对路径）
 FINAL_PREFIX = "/data/user/0/com.codex.mobile/files/usr"
 TERMUX_PREFIX = "/data/data/com.termux/files/usr"
-RUNTIME_VERSION = "0.7.0"
+RUNTIME_VERSION = "0.7.1"
 CODEX_VERSION = "0.104.0"  # 与 app-server 前端 UI/protocol 配套，勿随意升级
 SHARD_COUNT = 4            # 设备端并行解压线程数
 
