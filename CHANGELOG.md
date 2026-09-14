@@ -1,5 +1,54 @@
 # 更新日志
 
+## [v0.7.0] - 2026-09-14
+
+**工作台前端 P0/P1 修复：以「注入层补丁」架构在不改动上游 bundle 的前提下，修复新装死锁与移动端不可用两大 P0，补齐 markdown 渲染、工具过程透明度与中文化**
+
+### 新增：注入层补丁架构（本版本核心）
+
+- **设计原则**：不修改上游 Vue 压缩产物（`dist/assets/*.js`）。构建期向 `dist/index.html`
+  注入 `<script>/<link>`（幂等标记 `<!-- mobilecode-workbench-patch -->`），运行时逻辑全部
+  在自维护的 `workbench-patch.js / workbench-patch.css`（随 APK assets 分发，进镜像时拷入
+  `dist/inject/`）。**上游工作台升级后只需重跑一次注入**，补丁逻辑零合并成本。
+- 构建期自动下载并内置 marked 15.0.12 / DOMPurify 3.2.4 / highlight.js 11.10.0 UMD
+  （npmmirror 直链 + 本地缓存），注入 `window.__MC_HOME__` 兜底 HOME 路径。
+- Kotlin 侧 `onPageFinished` 注入真实 HOME 到 `window.__MC_HOME__` 并落 localStorage，
+  解决 patch 先于页面事件执行的时序问题（patch 内惰性读取 + 缓存）。
+
+### 修复（对应 [审计报告](docs/workbench-audit-2026-09.md) P0/P1/P2）
+
+- **P0 · 新装用户目录死锁**：上游目录下拉 = 历史会话 cwd 去重，而 thread 在首条消息前不物化
+  → 新装用户永远发不出第一条消息。补丁注入「开始构建」引导会话（fetch 劫持：`thread/list`
+  空时注入替身、`thread/resume` 替身后台真实 `thread/start`、`turn/start` 等请求透明映射到
+  真实 thread）——用户选中目录、输入消息即正常物化真实会话，全链路真机级实测通过。
+- **P0 · 移动端（<768px）侧栏破版**：上游仅桌面布局，手机上侧栏挤压主区不可用。补丁将侧栏
+  抽屉化（fixed + 滑出动画 + 遮罩），新增汉堡导航按钮（桌面自动隐藏），composer 适配
+  safe-area；主区 grid 列完整改写（上游 `grid-template-columns` 整体为 `var(--layout-columns)`
+  变量，须给全轨道定义而非单值）。390×844 视口实测三态截图（主页/抽屉/会话视图）正常，
+  桌面 1440×900 回归无影响。
+- **P1 · markdown 渲染缺失**：AI 回复原样显示 `**`/```/表格源码。补丁以 MutationObserver
+  扫描 `.message-text`（md 特征启发式 + rAF 节流 + `dataset` 幂等），marked 解析 →
+  DOMPurify 消毒 → highlight.js 代码高亮（github 主题）。
+- **P1 · 工具执行过程不透明**：上游 UI 不展示命令执行。补丁独立订阅 SSE
+  `item/started|completed`（commandExecution 载荷），右下角浮层实时显示工具调用状态
+  （运行中/成功/失败 + 命令 + 退出码），最近 20 条可展开。
+- **P1 · 冷启动竞态**：dist-cli 先就绪、引擎初始化慢，首批 RPC 502/503 且上游无重试
+  （页面卡 Loading）。补丁层 `fetchWithRetry`（900ms 间隔最多 3 次）。
+- **P2 · i18n**：清理上游俄语残留（Стоп 等），界面全面中文化（含 placeholder/aria-label/
+  按钮/空态文案）。
+
+### 验证
+
+- 镜像：4 分片 85.4 MB / 4148 文件，`.runtime-version 0.7.0`，注入产物 6 文件齐 +
+  index.html 注入标记；`verify-runtime.py scan` 279 ELF 全过 / 0 悬空链接。
+- e2e 三链路回归全过（Responses 直连 / chat-bridge / 工作台开箱启动 + 60 方法目录）。
+- 浏览器实测（Playwright，宿主测试环境）：死锁解锁全链路（引导会话→目录选择→发送→服务端
+  物化）、markdown 高亮（language-bash + hljs）、工具浮层计数、中文界面、移动端三态截图。
+
+### 其它
+
+- versionCode 14 → 15，versionName 0.7.0。
+
 ## [v0.6.1] - 2026-09-14
 
 **v0.6.0 的补漏与固化：镜像回归扫描抓出最后一处 glibc 残留，端到端验证能力正式入仓**

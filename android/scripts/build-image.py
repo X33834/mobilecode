@@ -36,13 +36,22 @@ from pathlib import Path
 # App 在手机上的最终前缀（与 AndroidManifest package 一致的绝对路径）
 FINAL_PREFIX = "/data/user/0/com.codex.mobile/files/usr"
 TERMUX_PREFIX = "/data/data/com.termux/files/usr"
-RUNTIME_VERSION = "0.6.1"
+RUNTIME_VERSION = "0.7.0"
 CODEX_VERSION = "0.104.0"  # 与 app-server 前端 UI/protocol 配套，勿随意升级
 SHARD_COUNT = 4            # 设备端并行解压线程数
 
 # 工作台运行依赖（codex-web-local 的 dist-cli 需要，但 bundle 未自带 node_modules）：
 # 构建机用系统 npm --omit=dev 安装，纯 JS 无平台产物
 WORKBENCH_RUNTIME_DEPS = ["express@5.1.0", "commander@13.1.0"]
+
+# v0.7.0 工作台注入层：markdown/高亮/防 XSS 的浏览器端 UMD 资产
+# （npmmirror registry files 直链；版本锁定，升级需回归验证）
+PATCH_UMD_ASSETS = [
+    ("marked.min.js", "https://registry.npmmirror.com/marked/15.0.12/files/lib/marked.umd.js"),
+    ("purify.min.js", "https://registry.npmmirror.com/dompurify/3.2.4/files/dist/purify.min.js"),
+    ("highlight.min.js", "https://registry.npmmirror.com/@highlightjs/cdn-assets/11.10.0/files/highlight.min.js"),
+    ("github.min.css", "https://registry.npmmirror.com/@highlightjs/cdn-assets/11.10.0/files/styles/github.min.css"),
+]
 
 ROOT = Path(__file__).resolve().parent.parent  # android/
 ASSETS = ROOT / "app" / "src" / "main" / "assets"
@@ -419,6 +428,8 @@ def main():
        not (workdir / "node_modules/commander/package.json").exists():
         raise SystemExit("[build-image] 工作台运行依赖安装不完整")
 
+    inject_workbench_patch(usr)
+
     log("写包装脚本…")
     # node 本体保持 deb 解出的真实二进制，不做包装
     node_bin = usr / "bin/node"
@@ -518,6 +529,11 @@ def main():
         "usr/lib/node_modules/codex-web-local/dist-cli/index.js",
         "usr/lib/node_modules/codex-web-local/node_modules/express/package.json",
         "usr/lib/node_modules/codex-web-local/node_modules/commander/package.json",
+        "usr/lib/node_modules/codex-web-local/dist/inject/workbench-patch.js",
+        "usr/lib/node_modules/codex-web-local/dist/inject/workbench-patch.css",
+        "usr/lib/node_modules/codex-web-local/dist/inject/marked.min.js",
+        "usr/lib/node_modules/codex-web-local/dist/inject/purify.min.js",
+        "usr/lib/node_modules/codex-web-local/dist/inject/highlight.min.js",
         "usr/.runtime-version",
     ]
     found = set()
@@ -533,6 +549,63 @@ def main():
     total_mb = sum(sh.stat().st_size for sh in shards) / 1024 / 1024
     log(f"OK：{len(shards)} 个分片共 {total_mb:.1f} MB（{total_files} 个文件）")
     shutil.rmtree(STAGE / "data", ignore_errors=True)
+
+
+# ── 4c. 工作台注入层（v0.7.0） ─────────────────────────────────────
+# 上游前端（Vue bundle）有三个 P0/P1 缺口：新装用户目录死锁、移动端侧栏
+# 不折叠、无 markdown 渲染。不改动上游压缩产物 —— 构建期向 dist/index.html
+# 注入 <script>/<link>，运行时补丁逻辑全部在自维护的 workbench-patch.js
+# （上游升级只需重跑注入）。
+
+INJECT_MARK = "<!-- mobilecode-workbench-patch -->"
+
+
+def inject_workbench_patch(usr: Path):
+    workdir = usr / "lib/node_modules/codex-web-local/dist"
+    inject_dir = workdir / "inject"
+    inject_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1) 自维护补丁（assets 与镜像保持同源）
+    for name in ("workbench-patch.js", "workbench-patch.css"):
+        src = ASSETS / name
+        if not src.exists():
+            raise SystemExit(f"[build-image] 缺补丁源文件: {src}")
+        shutil.copy2(src, inject_dir / name)
+        (inject_dir / name).chmod(0o644)
+
+    # 2) 浏览器端渲染库 UMD（npmmirror 直链，带缓存）
+    inject_dir_cache = CACHE / "inject-umd"
+    inject_dir_cache.mkdir(parents=True, exist_ok=True)
+    for name, url in PATCH_UMD_ASSETS:
+        cached = inject_dir_cache / name
+        if not cached.exists() or cached.stat().st_size < 1024:
+            log(f"下载注入资产 {name} …")
+            req = urllib.request.Request(url, headers={"User-Agent": "mobilecode-build"})
+            with urllib.request.urlopen(req, timeout=120) as resp, \
+                 open(cached, "wb") as fh:
+                fh.write(resp.read())
+        shutil.copy2(cached, inject_dir / name)
+
+    # 3) index.html 注入（幂等）
+    index = workdir / "index.html"
+    html = index.read_text(encoding="utf-8")
+    if INJECT_MARK not in html:
+        inject = (f"{INJECT_MARK}\n"
+                  f'    <link rel="stylesheet" href="/inject/github.min.css">\n'
+                  f'    <link rel="stylesheet" href="/inject/workbench-patch.css">\n'
+                  f'    <script>window.__MC_HOME__="/data/user/0/com.codex.mobile/files/home";</script>\n'
+                  f'    <script src="/inject/marked.min.js"></script>\n'
+                  f'    <script src="/inject/purify.min.js"></script>\n'
+                  f'    <script src="/inject/highlight.min.js"></script>\n'
+                  f'    <script src="/inject/workbench-patch.js"></script>\n')
+        if "</head>" in html:
+            html = html.replace("</head>", f"  {inject.strip()}\n  </head>", 1)
+        else:
+            html = html.replace("</body>", f"  {inject.strip()}\n  </body>", 1)
+        index.write_text(html, encoding="utf-8")
+        log("index.html 已注入 workbench patch")
+    else:
+        log("index.html 已含注入标记（跳过）")
 
 
 # ── 5a. 镜像瘦身 ─────────────────────────────────────────────────

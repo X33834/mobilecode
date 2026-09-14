@@ -183,6 +183,19 @@ class MainActivity : AppCompatActivity() {
                 }
                 return false
             }
+
+            override fun onPageFinished(view: WebView, url: String) {
+                super.onPageFinished(view, url)
+                // v0.7.0：向 workbench-patch 下发用户真实 home 目录。
+                // patch 用它生成"引导会话"（解锁新装用户的目录下拉死锁）；
+                // index.html 里的默认值仅是兜底，以此处注入为准。
+                val home = BootstrapInstaller.getPaths(this@MainActivity).homeDir
+                view.evaluateJavascript(
+                    "window.__MC_HOME__=${org.json.JSONObject.quote(home)};" +
+                        "try{localStorage.setItem('mc.home',window.__MC_HOME__)}catch(e){}",
+                    null,
+                )
+            }
         }
 
         webView.webChromeClient = object : WebChromeClient() {

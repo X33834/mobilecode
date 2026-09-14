@@ -32,14 +32,22 @@ WebView → http://127.0.0.1:18923（仅本机绑定）
 
 ## 三、缺陷清单（实测证据）
 
-### P0-1：移动端布局破版
+> **2026-09 修复状态（v0.7.0）**：P0-1 / P0-2 / markdown / 工具过程 / i18n（含俄语残留）
+> **已全部修复**，采用「注入层补丁」架构（不改上游 bundle，升级零合并成本），
+> 详见 [CHANGELOG v0.7.0](../CHANGELOG.md)。未修复项：图片上传（P1）、
+> Skills/MCP 管理页（P2）、语音输入（P2）、用量显示（P2）。
+
+### P0-1：移动端布局破版 ✅ 已修复（v0.7.0）
 
 390×844（典型手机）下侧栏不折叠，占屏约 2/3，会话主区与输入框被挤出屏幕外。
 上游为桌面浏览器设计，无移动端断点。
 
 ![移动端破版](assets/workbench-mobile.png)
 
-### P0-2：新装用户无法发出第一条消息（UX 死锁）
+修复后：侧栏抽屉化 + 汉堡导航，主区 grid 列完整改写（`--layout-columns` 须给全轨道定义），
+390×844 三态实测正常，桌面回归无影响。
+
+### P0-2：新装用户无法发出第一条消息（UX 死锁）✅ 已修复（v0.7.0）
 
 前端逻辑（bundle 逆向确认）：目录下拉的选项 = 历史会话 cwd 去重集合；
 新装 app 无任何历史 → 下拉为空且 disabled。
@@ -49,19 +57,24 @@ WebView → http://127.0.0.1:18923（仅本机绑定）
 实测：直接经 RPC 创建会话并发消息成功后，刷新页面 UI 即恢复正常（选项出现、列表可用）——
 死锁只卡"从零到第一条消息"这一步。
 
-### P1：渲染与透明度
+修复后：注入「开始构建」引导会话（fetch 劫持：替身 thread/resume → 后台真实
+thread/start → turn/start 透明映射），用户选目录、发首条消息即物化真实会话，全链路实测通过。
 
-- 无 markdown / 代码高亮渲染（bundle 中 0 处 markdown/marked/highlight），agent 输出代码块按纯文本展示
-- 工具执行过程不展示：`thread/read` 的 turn items 仅含 userMessage/agentMessage，
-  用户看不到 agent 执行了什么命令、输出与 diff
-- 无图片/文件上传（引擎 InputItem 支持 image，UI 未接）
+### P1：渲染与透明度（markdown/工具过程 ✅ 已修复；图片上传未修）
 
-### P2：能力闲置与体验短板
+- ~~无 markdown / 代码高亮渲染~~ ✅ v0.7.0：marked + DOMPurify + highlight.js 注入式渲染
+  （MutationObserver + 特征启发式 + 幂等标记）
+- ~~工具执行过程不展示~~ ✅ v0.7.0：独立订阅 SSE `item/started|completed`，右下角浮层
+  实时显示命令执行状态（运行中/成功/失败 + 退出码），最近 20 条
+- 无图片/文件上传（引擎 InputItem 支持 image，UI 未接）——**待修**
+
+### P2：能力闲置与体验短板（i18n ✅ 已修复；其余未修）
 
 - 前端仅使用引擎 60 个 RPC 方法中的 **9 个**；skills（×4）、MCP（×3）、review/start、
   turn/steer（对话中途转向）、thread/compact（上下文压缩）、thread/rollback、
-  gitDiffToRemote、fuzzyFileSearch、rateLimits 等全部无 UI 入口
-- 无语音输入；无用量/速率显示；无 i18n（上游残留俄语 aria-label "Стоп"）
+  gitDiffToRemote、fuzzyFileSearch、rateLimits 等全部无 UI 入口——**待修**
+- 无语音输入；无用量/速率显示——**待修**
+- ~~无 i18n（上游残留俄语 aria-label "Стоп"）~~ ✅ v0.7.0：界面全面中文化
 - 主题跟随系统暗色模式未确认
 
 ## 四、修复路线
