@@ -200,6 +200,7 @@ mobilecode-repo/
 ├── art/                    ← marketing/hero assets
 ├── docs/
 │   ├── ROADMAP.md          ← roadmap & milestones
+│   ├── workbench-audit-2026-09.md ← workbench frontend audit vs 2026 agents
 │   └── domestic-models.md  ← domestic model provider notes
 ├── release/                ← prebuilt APKs
 └── android/                ← curated source mirror (full source: openclaw-android)
@@ -224,6 +225,7 @@ mobilecode-repo/
 ## Roadmap & Docs
 
 - [ROADMAP.md](docs/ROADMAP.md) — what is coming next
+- [workbench-audit-2026-09.md](docs/workbench-audit-2026-09.md) — workbench frontend audit vs 2026 agent standards (P0 gaps & fix plan)
 - [DESIGN.md](DESIGN.md) — architecture rationale and trade-offs
 - [CHANGELOG.md](CHANGELOG.md) — version history
 

@@ -196,6 +196,7 @@ mobilecode-repo/
 ├── art/                    ← 宣传/主图素材
 ├── docs/
 │   ├── ROADMAP.md          ← 路线图与里程碑
+│   ├── workbench-audit-2026-09.md ← 工作台前端对标检查报告
 │   └── domestic-models.md  ← 国产模型接入说明
 ├── release/                ← 预构建 APK
 └── android/                ← 精选源码镜像（完整源码见 openclaw-android）
@@ -220,6 +221,7 @@ mobilecode-repo/
 ## 路线图与文档
 
 - [ROADMAP.md](docs/ROADMAP.md) —— 下一步规划
+- [workbench-audit-2026-09.md](docs/workbench-audit-2026-09.md) —— 工作台前端对标 2026 检查（P0 缺口与修复路线）
 - [DESIGN.md](DESIGN.md) —— 架构取舍与理由
 - [CHANGELOG.md](CHANGELOG.md) —— 版本历史
 
