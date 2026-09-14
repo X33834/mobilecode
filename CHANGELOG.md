@@ -1,5 +1,42 @@
 # 更新日志
 
+## [v0.7.2] - 2026-09-15
+
+**全量测试 + 查漏补缺：P1 图片上传落地（协议勘破），Skills/MCP/用量三大能力入口补齐，审计报告 P1/P2 可修项清零**
+
+### 新增
+
+- **图片/文件上传（P1 最后一项）**：composer 新增回形针按钮。**协议勘破**：引擎实测只接受
+  `{type:'localImage', path:'<真实路径>'}`（`image`/`imageUrl`/`source` 等所有 base64 变体
+  一律被拒）——WebView 内无法落盘，故由 Kotlin `onShowFileChooser` 接管系统选图 → 复制到
+  app 私有 cache → `evaluateJavascript` 把真实路径回填 `window.__MC_FILE_READY__` → 补丁在
+  `turn/start` 时以 `localImage` 注入 input 数组。不传 base64，大图零内存压力。
+  附件 chips 可预览/移除，发送后自动清空；composer 被 Vue 重建时随扫帧自愈重挂载。
+- **Skills / MCP 资源面板（P2）**：工具浮层升级为「活动 | 资源」双 tab。资源 tab 调
+  `skills/list` + `mcpServerStatus/list`（引擎 60 方法中此前 UI 零入口的部分），实测展示
+  skill-creator / skill-installer 与 MCP 服务器状态。
+- **上下文用量显示（P2）**：消费 SSE `thread/tokenUsage/updated`（不依赖 ChatGPT 账号登录——
+  实测 `account/rateLimits/read` 在 API Key 模式下返回 authentication required），面板顶部
+  实时显示「上下文 tokens / 模型窗口（百分比）」+ 进度条，>80% 变红预警。
+- **工具活动按会话过滤**：活动记录携带 threadId，面板「仅本会话」开关（默认开），
+  多会话并行时不再混显。
+
+### 修复（本轮全量测试新发现）
+
+- **裸 RPC 误报 502**：宿主测试中确认 dist-cli 在无 SSE 订阅者时把真实错误（如
+  thread not found）包成 502 Bad Gateway——浏览器 UI 因始终持有 EventSource 不受影响，
+  已在排查记录与文档中标注，测试脚本需先建 SSE 连接。
+
+### 验证
+
+- 全量三层回归：scan 279 ELF 全过；e2e 三链路全过；浏览器端图片附件端到端
+  （`lastTurnInput` 确认 localImage 注入）、用量行（72 / 258.4k）、资源面板（2 skills）、
+  活动过滤全部实测通过；v0.7.0/v0.7.1 既有能力无回归。
+
+### 其它
+
+- versionCode 16 → 17，versionName 0.7.2。
+
 ## [v0.7.1] - 2026-09-14
 
 **二轮深挖：以挑刺视角对前端细节与大使用场景实测，抓出 4 个 v0.7.0 补丁/上游遗留缺陷并全部修复**

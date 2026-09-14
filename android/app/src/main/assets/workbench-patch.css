@@ -1,4 +1,4 @@
-/*! Mobilecode workbench patch css v0.7.1（移动端适配 + markdown 样式 + 工具浮层） */
+/*! Mobilecode workbench patch css v0.7.2（移动端适配 + markdown 样式 + 工具浮层） */
 
 /* ── 移动端：侧栏抽屉化（<768px），桌面不受影响 ── */
 @media (max-width: 767px) {
@@ -312,5 +312,165 @@ body.mc-nav-open #mc-nav-backdrop {
   .message-text.mc-md blockquote {
     border-left-color: rgba(148, 163, 184, 0.45) !important;
     color: rgba(226, 232, 240, 0.85) !important;
+  }
+}
+
+/* ── 图片附件区（P1）：回形针 + 文件 chips ── */
+#mc-attach-wrap {
+  padding: 0 4px 4px;
+}
+#mc-attach-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+#mc-attach-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.75;
+}
+#mc-attach-btn:hover { opacity: 1; }
+#mc-attach-hint {
+  font-size: 11px;
+  opacity: 0.6;
+}
+#mc-attach-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.mc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: rgba(100, 116, 139, 0.18);
+  font-size: 11px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mc-chip button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+/* ── 工具面板：tab 栏 / 用量条 / 资源列表 ── */
+#mc-act-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+}
+.mc-act-tab {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  opacity: 0.6;
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.mc-tab-on {
+  opacity: 1;
+  background: rgba(100, 116, 139, 0.22);
+}
+#mc-act-filter {
+  font-size: 11px;
+  opacity: 0.75;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+}
+#mc-act-close {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+#mc-usage-line {
+  font-size: 11px;
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+  opacity: 0.85;
+}
+#mc-usage-line.mc-usage-hot {
+  color: #ff8a80;
+  opacity: 1;
+}
+.mc-usage-bar {
+  display: block;
+  height: 3px;
+  margin-top: 4px;
+  border-radius: 2px;
+  background: rgba(148, 163, 184, 0.25);
+  overflow: hidden;
+}
+.mc-usage-bar > i {
+  display: block;
+  height: 100%;
+  background: #4f8cff;
+}
+#mc-usage-line.mc-usage-hot .mc-usage-bar > i {
+  background: #ff5252;
+}
+#mc-act-body {
+  max-height: 340px;
+  overflow-y: auto;
+}
+.mc-res-title {
+  font-size: 11px;
+  opacity: 0.7;
+  margin: 8px 0 4px;
+}
+.mc-res-item {
+  padding: 5px 6px;
+  border-radius: 6px;
+  background: rgba(100, 116, 139, 0.14);
+  margin-bottom: 5px;
+}
+.mc-res-item code { font-size: 11px; }
+.mc-res-desc {
+  font-size: 10.5px;
+  opacity: 0.7;
+  margin-top: 2px;
+  line-height: 1.35;
+}
+
+/* ── 暗色二迭代：按钮与下拉对比度打磨 ── */
+@media (prefers-color-scheme: dark) {
+  .thread-composer-submit {
+    background-color: oklch(45% 0.15 264) !important;
+    color: #fff !important;
+  }
+  #mc-attach-btn {
+    border-color: rgba(148, 163, 184, 0.4);
+  }
+  .mc-chip {
+    background: rgba(148, 163, 184, 0.2);
+  }
+  #mc-activity-list {
+    background: oklch(23% 0.04 265.755);
+    color: oklch(93% 0.01 247.896);
   }
 }

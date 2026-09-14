@@ -1,4 +1,4 @@
-/*! Mobilecode workbench patch v0.7.1
+/*! Mobilecode workbench patch v0.7.2
  * 注入层前端补丁（不修改上游 bundle，升级可平移）：
  *  1. fetch 劫持：解新装用户"目录下拉死锁"（thread/list 为空时注入引导会话，
  *     __mc_welcome__ 替身的首条消息在后台真实 thread/start + turn/start）
@@ -62,6 +62,91 @@
 
   var _fetch = window.fetch.bind(window);
 
+  /* ────────── 图片附件（P1）：引擎只接受 {type:'localImage', path} ──────────
+   * WebView 内无法直接落盘，由 Kotlin onShowFileChooser 选图后写入 cache 并把
+   * 真实路径回调给 window.__MC_FILE_READY__；宿主浏览器环境无 Kotlin 时降级提示。
+   */
+  var pendingFiles = [];
+
+  function drawPendingFiles() {
+    var box = document.querySelector('#mc-attach-chips');
+    if (!box) return;
+    box.innerHTML = pendingFiles.map(function (f, i) {
+      return '<span class="mc-chip">' + esc(f.name) +
+        '<button data-i="' + i + '" aria-label="移除附件">×</button></span>';
+    }).join('');
+    Array.prototype.forEach.call(box.querySelectorAll('button'), function (b) {
+      b.addEventListener('click', function () {
+        pendingFiles.splice(parseInt(b.getAttribute('data-i'), 10), 1);
+        drawPendingFiles();
+      });
+    });
+    box.hidden = pendingFiles.length === 0;
+  }
+
+  function addPendingFile(name, path) {
+    pendingFiles.push({ name: name, path: path });
+    drawPendingFiles();
+  }
+
+  window.__MC_FILE_READY__ = function (path) {
+    var name = String(path || '').split('/').pop() || 'image';
+    addPendingFile(name, path);
+    var hint = document.querySelector('#mc-attach-hint');
+    if (hint) { hint.textContent = '已附加 ' + name; }
+  };
+
+  function buildComposerAttach() {
+    if (!document.querySelector('.thread-composer-shell') ||
+        document.querySelector('#mc-attach-btn')) return;
+    var btn = document.createElement('button');
+    btn.id = 'mc-attach-btn';
+    btn.setAttribute('aria-label', '附加图片');
+    btn.title = '附加图片';
+    btn.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" ' +
+      'stroke="currentColor" stroke-width="2" stroke-linecap="round">' +
+      '<path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>' +
+      '</svg>';
+    var input = document.createElement('input');
+    input.id = 'mc-file-input';
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.multiple = true;
+    input.hidden = true;
+    var chips = document.createElement('div');
+    chips.id = 'mc-attach-chips';
+    chips.hidden = true;
+    var hint = document.createElement('span');
+    hint.id = 'mc-attach-hint';
+
+    btn.addEventListener('click', function () {
+      try {
+        input.value = '';
+        input.click();   // 触发 Kotlin WebChromeClient.onShowFileChooser
+      } catch (e) { /* 忽略 */ }
+    });
+    input.addEventListener('change', function () {
+      if (!window.__MC_BRIDGE__) {
+        hint.textContent = '此环境不支持文件选择（需 App 端支持）';
+        setTimeout(function () { hint.textContent = ''; }, 2500);
+      }
+      // 有 Kotlin bridge 时由 __MC_FILE_READY__ 回填真实路径
+    });
+
+    var shell = document.querySelector('.thread-composer-shell');
+    var host = shell.parentNode;
+    var wrap = document.createElement('div');
+    wrap.id = 'mc-attach-wrap';
+    wrap.appendChild(chips);
+    var row = document.createElement('div');
+    row.id = 'mc-attach-row';
+    row.appendChild(btn);
+    row.appendChild(hint);
+    wrap.appendChild(row);
+    host.insertBefore(wrap, shell);
+    wrap.appendChild(input);
+  }
+
   // app-server 冷启动竞态：dist-cli 先就绪、qemu 引擎初始化慢，首批 RPC 可能
   // 打出 502/503 且上游前端不重试（页面会卡在 Loading）—— patch 层自动重试。
   function fetchWithRetry(url, init, tries) {
@@ -85,6 +170,20 @@
     var req = null;
     if (isRpc && method === 'POST' && init && typeof init.body === 'string') {
       try { req = JSON.parse(init.body); } catch (e) { /* 非 JSON，放行 */ }
+    }
+
+    // 图片附件：引擎实测只接受 {type:'localImage', path}（所有 base64 变体
+    // 一律被拒），路径由 Kotlin 侧选图后写入 —— 避免 WebView 内传 base64
+    if (req && req.method === 'turn/start' && pendingFiles.length > 0) {
+      var inArr = Array.isArray(req.params.input) ? req.params.input : [];
+      pendingFiles.forEach(function (f) {
+        if (f.path) inArr.push({ type: 'localImage', path: f.path });
+      });
+      req.params.input = inArr;
+      init = Object.assign({}, init, { body: JSON.stringify(req) });
+      if (window.__MC_DEBUG__) window.__MC_DEBUG__.lastTurnInput = inArr.slice();
+      pendingFiles = [];
+      drawPendingFiles();
     }
 
     // turn/start on 替身 → 先真实 thread/start，再以真实 id 转发
@@ -248,6 +347,10 @@
     requestAnimationFrame(function () {
       pending = false;
       try {
+        // composer 在会话切换时会被 Vue 重建 —— 附件区随扫帧自愈重新挂载
+        if (document.querySelector('.thread-composer-shell') && !document.querySelector('#mc-attach-btn')) {
+          buildComposerAttach();
+        }
         document.querySelectorAll('.message-text').forEach(renderMarkdown);
         polish(document.querySelectorAll('button,[aria-label],p,h1,h2,h3,span,input,textarea'));
       } catch (e) { /* 单轮失败不致命 */ }
@@ -264,6 +367,11 @@
 
   var activity = [];
   var actPanelOpen = false;
+  var actTab = 'activity';          // 'activity' | 'resource'
+  var onlyThisThread = true;
+  var currentThreadId = null;
+  var usage = null;                 // thread/tokenUsage/updated 最新值
+  var resources = { skills: [], mcp: [], loaded: false };
 
   function buildActivityPanel() {
     var root = document.createElement('div');
@@ -273,14 +381,113 @@
       '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
       '<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>' +
       '<span id="mc-activity-count">0</span></button>' +
-      '<div id="mc-activity-list" hidden></div>';
+      '<div id="mc-activity-list" hidden>' +
+      '<div id="mc-act-bar">' +
+      '<button data-tab="activity" class="mc-act-tab mc-tab-on">活动</button>' +
+      '<button data-tab="resource" class="mc-act-tab">资源</button>' +
+      '<label id="mc-act-filter"><input type="checkbox" checked> 仅本会话</label>' +
+      '<button id="mc-act-close" aria-label="关闭">×</button>' +
+      '</div>' +
+      '<div id="mc-usage-line"></div>' +
+      '<div id="mc-act-body"></div>' +
+      '</div>';
     document.body.appendChild(root);
     root.querySelector('#mc-activity-badge').addEventListener('click', function () {
       actPanelOpen = !actPanelOpen;
       root.querySelector('#mc-activity-list').hidden = !actPanelOpen;
       if (actPanelOpen) drawActivity();
     });
+    root.querySelector('#mc-act-close').addEventListener('click', function () {
+      actPanelOpen = false;
+      root.querySelector('#mc-activity-list').hidden = true;
+    });
+    Array.prototype.forEach.call(root.querySelectorAll('.mc-act-tab'), function (b) {
+      b.addEventListener('click', function () {
+        actTab = b.getAttribute('data-tab');
+        Array.prototype.forEach.call(root.querySelectorAll('.mc-act-tab'), function (x) {
+          x.classList.toggle('mc-tab-on', x.getAttribute('data-tab') === actTab);
+        });
+        drawActivity();
+        if (actTab === 'resource') loadResources();
+      });
+    });
+    var cb = root.querySelector('#mc-act-filter input');
+    cb.addEventListener('change', function () {
+      onlyThisThread = cb.checked;
+      drawActivity();
+    });
     return root;
+  }
+
+  /* Skills / MCP 只读面板：引擎 RPC 早已具备，前端此前零入口 */
+  function loadResources() {
+    if (resources.loaded) return;
+    resources.loaded = true;
+    _fetch('/codex-api/rpc', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: Date.now(), method: 'skills/list', params: { cwd: currentHome() } })
+    }).then(function (r) { return r.json(); }).then(function (j) {
+      var groups = (j.result && j.result.data) || [];
+      resources.skills = [];
+      groups.forEach(function (g) {
+        (g.skills || []).forEach(function (s) {
+          resources.skills.push({
+            name: s.name || '?',
+            desc: s.shortDescription || s.description || ''
+          });
+        });
+      });
+      drawActivity();
+    }).catch(function () { /* 拉取失败保持空 */ });
+    _fetch('/codex-api/rpc', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: Date.now() + 1, method: 'mcpServerStatus/list', params: {} })
+    }).then(function (r) { return r.json(); }).then(function (j) {
+      resources.mcp = (j.result && j.result.data) || [];
+      drawActivity();
+    }).catch(function () { /* 忽略 */ });
+  }
+
+  function drawUsage() {
+    var line = document.querySelector('#mc-usage-line');
+    if (!line) return;
+    if (!usage || !usage.modelContextWindow) {
+      line.textContent = '';
+      line.hidden = true;
+      return;
+    }
+    var used = usage.totalTokens || 0;
+    var win = usage.modelContextWindow || 0;
+    var pct = win ? Math.min(100, Math.round(used / win * 1000) / 10) : 0;
+    line.hidden = false;
+    line.className = pct > 80 ? 'mc-usage-hot' : '';
+    line.innerHTML = '上下文 ' + fmtNum(used) + ' / ' + fmtNum(win) + '（' + pct + '%）' +
+      '<span class="mc-usage-bar"><i style="width:' + pct + '%"></i></span>';
+  }
+
+  function fmtNum(n) {
+    return n >= 10000 ? (Math.round(n / 100) / 10) + 'k' : String(n);
+  }
+
+  function drawResources() {
+    var html = '';
+    html += '<div class="mc-res-title">Skills（' + resources.skills.length + '）</div>';
+    html += resources.skills.length
+      ? resources.skills.map(function (s) {
+          return '<div class="mc-res-item"><code>' + esc(s.name) + '</code>' +
+            '<div class="mc-res-desc">' + esc(s.desc.slice(0, 90)) + '</div></div>';
+        }).join('')
+      : '<div class="mc-act-empty">加载中或暂无可用 skill</div>';
+    html += '<div class="mc-res-title">MCP 服务器（' + resources.mcp.length + '）</div>';
+    html += resources.mcp.length
+      ? resources.mcp.map(function (m) {
+          return '<div class="mc-res-item"><code>' + esc(m.name || '?') + '</code>' +
+            '<div class="mc-act-meta">' + esc(String(m.status || '')) + '</div></div>';
+        }).join('')
+      : '<div class="mc-act-empty">未配置 MCP 服务器（config.toml 可添加）</div>';
+    return html;
   }
 
   function esc(s) {
@@ -289,9 +496,17 @@
   }
 
   function drawActivity() {
-    var list = document.querySelector('#mc-activity-list');
+    var list = document.querySelector('#mc-act-body');
     if (!list) return;
-    var html = activity.slice(-20).reverse().map(function (a) {
+    drawUsage();
+    if (actTab === 'resource') {
+      list.innerHTML = drawResources();
+      return;
+    }
+    var items = activity.slice(-50).filter(function (a) {
+      return !onlyThisThread || !currentThreadId || !a.threadId || a.threadId === currentThreadId;
+    });
+    var html = items.reverse().slice(0, 20).map(function (a) {
       var cls = 'mc-act ' + (a.status === 'completed' ? 'mc-act-ok'
         : a.status === 'failed' ? 'mc-act-bad' : 'mc-act-run');
       var head = '<div class="mc-act-cmd"><code>' + esc(a.command) + '</code></div>';
@@ -327,7 +542,9 @@
       var d;
       try { d = JSON.parse(ev.data); } catch (e) { return; }
       var m = d.method || '';
-      var it = (d.params && d.params.item) || null;
+      var p = d.params || {};
+      if (p.threadId) currentThreadId = p.threadId;
+      var it = p.item || null;
       if (m === 'turn/started') {
         turnActive = true;
         turnGotReply = false;
@@ -335,6 +552,7 @@
           it.type === 'commandExecution') {
         pushActivity({
           id: it.id,
+          threadId: p.threadId || null,
           command: it.command,
           status: it.status,
           exitCode: it.exitCode,
@@ -342,15 +560,25 @@
         });
       } else if (m === 'item/agentMessage/delta') {
         turnGotReply = true;
-        pushActivity({ id: '__stream__', command: '（模型回复生成中…）', status: 'inProgress' });
+        pushActivity({ id: '__stream__', threadId: p.threadId || null, command: '（模型回复生成中…）', status: 'inProgress' });
         setTimeout(function () { pushActivity({ id: '__stream__', status: 'done', command: '（回复完成）' }); }, 2500);
       } else if ((m === 'item/completed') && it && it.type === 'agentMessage' && it.text) {
         turnGotReply = true;
+      } else if (m === 'thread/tokenUsage/updated' && p.tokenUsage) {
+        // 上下文占用：engine 每个 turn 推送（含 modelContextWindow），
+        // 不依赖 ChatGPT 账号登录（account/rateLimits/read 需登录才可用）
+        var tu = p.tokenUsage;
+        usage = {
+          totalTokens: (tu.total && tu.total.totalTokens) || 0,
+          inputTokens: (tu.total && tu.total.inputTokens) || 0,
+          outputTokens: (tu.total && tu.total.outputTokens) || 0,
+          modelContextWindow: tu.modelContextWindow || 0
+        };
+        drawUsage();
       } else if (m === 'turn/completed') {
         pushActivity({ id: '__stream__', status: 'done', command: '（回合完成）' });
         // 上游前端不消费任何失败事件（bundle 逆向 0 处 turn/failed 处理）：
         // 引擎 StreamErrorEvent/TurnError 后 UI 完全静默，这里做兜底提示
-        var p = d.params || {};
         var failHint = p.error || p.failure || p.errorMessage ||
           (p.turn && (p.turn.error || p.turn.failure || p.turn.status === 'failed'));
         if (failHint) {
@@ -433,6 +661,7 @@
     buildNav();
     buildActivityPanel();
     buildBanner();
+    buildComposerAttach();
     startObserver();
     startSse();
     // 跨断点清抽屉状态：移动端开的抽屉在切回桌面（转屏/分屏）时残留
@@ -446,7 +675,13 @@
   }
 
   // 调试/诊断句柄（App 端诊断中心或远程排查用）
-  window.__MC_DEBUG__ = { showBanner: showBanner, hideBanner: hideBanner, pushActivity: pushActivity };
+  window.__MC_DEBUG__ = {
+    showBanner: showBanner,
+    hideBanner: hideBanner,
+    pushActivity: pushActivity,
+    attach: function (name, path) { addPendingFile(name, path); },
+    resources: function () { loadResources(); }
+  };
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', boot);

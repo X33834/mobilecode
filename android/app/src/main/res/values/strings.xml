@@ -17,4 +17,5 @@
     <string name="error_bootstrap">环境初始化失败。点「重试」可重试；若反复失败，请到「诊断与环境」查看详情或重置环境。</string>
     <string name="error_server">工作台启动失败。</string>
     <string name="retry">重试</string>
+    <string name="pick_image_title">选择要附加的图片</string>
 </resources>

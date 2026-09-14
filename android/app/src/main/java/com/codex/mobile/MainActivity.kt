@@ -1,5 +1,6 @@
 package com.codex.mobile
 
+import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -11,12 +12,14 @@ import android.provider.Settings
 import android.util.Log
 import android.view.View
 import android.webkit.ConsoleMessage
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.EditText
 import android.widget.ProgressBar
 import android.widget.TextView
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import java.util.Locale
@@ -55,6 +58,63 @@ class MainActivity : AppCompatActivity() {
     private lateinit var metaText: TextView
     private lateinit var settingsBtn: android.widget.ImageButton
     private lateinit var serverManager: CodexServerManager
+
+    // ── 图片附件：WebView 选图 → 落盘 cache → 把真实路径回填给前端补丁 ──
+    private var filePathCallback: ValueCallback<Array<Uri>>? = null
+
+    private val filePickerLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        val cb = filePathCallback
+        filePathCallback = null
+        val results = mutableListOf<Uri>()
+        if (result.resultCode == Activity.RESULT_OK && cb != null) {
+            val clip = result.data?.clipData
+            val single = result.data?.data
+            val uris = mutableListOf<Uri>()
+            if (clip != null) {
+                for (i in 0 until clip.itemCount) uris.add(clip.getItemAt(i).uri)
+            } else if (single != null) {
+                uris.add(single)
+            }
+            uris.forEach { uri ->
+                val cached = copyToCache(uri)
+                if (cached != null) {
+                    results.add(Uri.fromFile(cached))
+                    announceFilePath(cached.absolutePath)
+                } else {
+                    Log.w(TAG, "Failed to cache picked image: $uri")
+                }
+            }
+        }
+        cb?.onReceiveValue(if (results.isEmpty()) null else results.toTypedArray())
+    }
+
+    /** 把用户选中的内容 Uri 复制到 app 私有 cache（引擎只读真实文件路径）。 */
+    private fun copyToCache(uri: Uri): java.io.File? {
+        return try {
+            val dir = java.io.File(cacheDir, "mc-upload").apply { mkdirs() }
+            val ext = (contentResolver.getType(uri)?.substringAfter('/') ?: "png")
+                .let { if (it.length in 1..5) it else "png" }
+            val out = java.io.File(dir, "img-${System.currentTimeMillis()}-${(0..9999).random()}.$ext")
+            val input = contentResolver.openInputStream(uri) ?: return null
+            input.use { src -> out.outputStream().use { dst -> src.copyTo(dst) } }
+            out
+        } catch (e: Exception) {
+            Log.e(TAG, "copyToCache failed", e)
+            null
+        }
+    }
+
+    private fun announceFilePath(path: String) {
+        runOnUiThread {
+            if (!::webView.isInitialized) return@runOnUiThread
+            webView.evaluateJavascript(
+                "window.__MC_FILE_READY__&&window.__MC_FILE_READY__(${org.json.JSONObject.quote(path)});",
+                null,
+            )
+        }
+    }
 
     // ── 进度跟踪状态 ───────────────────────────────────────────────
     @Volatile private var currentStep = -1
@@ -202,6 +262,36 @@ class MainActivity : AppCompatActivity() {
             override fun onConsoleMessage(msg: ConsoleMessage): Boolean {
                 Log.d(TAG, "[WebView] ${msg.sourceId()}:${msg.lineNumber()} ${msg.message()}")
                 return true
+            }
+
+            // 工作台补丁的「附加图片」按钮会派发 <input type=file> 的点击，
+            // 这里接管选图并回传真实文件路径（WebView 内无法直接落盘）
+            override fun onShowFileChooser(
+                wv: WebView,
+                callback: ValueCallback<Array<Uri>>,
+                params: FileChooserParams,
+            ): Boolean {
+                filePathCallback?.onReceiveValue(null)
+                filePathCallback = callback
+                val accept = params.acceptTypes.firstOrNull { it.isNotBlank() }
+                val mime = when {
+                    accept.isNullOrBlank() -> "image/*"
+                    accept == "*/*" -> "*/*"
+                    else -> accept
+                }
+                val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
+                    type = mime
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                }
+                return try {
+                    filePickerLauncher.launch(Intent.createChooser(intent, getString(R.string.pick_image_title)))
+                    true
+                } catch (e: Exception) {
+                    Log.e(TAG, "File chooser unavailable", e)
+                    filePathCallback = null
+                    false
+                }
             }
         }
     }

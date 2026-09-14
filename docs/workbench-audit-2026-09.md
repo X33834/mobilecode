@@ -32,10 +32,13 @@ WebView → http://127.0.0.1:18923（仅本机绑定）
 
 ## 三、缺陷清单（实测证据）
 
-> **2026-09 修复状态（v0.7.0）**：P0-1 / P0-2 / markdown / 工具过程 / i18n（含俄语残留）
-> **已全部修复**，采用「注入层补丁」架构（不改上游 bundle，升级零合并成本），
-> 详见 [CHANGELOG v0.7.0](../CHANGELOG.md)。未修复项：图片上传（P1）、
-> Skills/MCP 管理页（P2）、语音输入（P2）、用量显示（P2）。
+> **2026-09 修复状态（v0.7.2 累计）**：P0-1 / P0-2 / markdown / 工具过程 / i18n /
+> **图片上传（P1 最后一项）/ Skills-MCP 面板（P2）/ 用量显示（P2）已全部修复**，
+> 采用「注入层补丁」架构（不改上游 bundle，升级零合并成本），
+> 详见 [CHANGELOG](../CHANGELOG.md)。仍未修：语音输入（P2）、Skills/MCP 写操作管理（现仅只读展示）。
+
+> **协议勘破（v0.7.2）**：引擎图片输入只接受 `{type:"localImage", path:"<真实路径>"}`，
+> 全部 base64 变体（image/imageUrl/source）一律被拒——移动端实现走 Kotlin 选图落盘 + 路径回填。
 
 ### P0-1：移动端布局破版 ✅ 已修复（v0.7.0）
 
@@ -66,14 +69,15 @@ thread/start → turn/start 透明映射），用户选目录、发首条消息�
   （MutationObserver + 特征启发式 + 幂等标记）
 - ~~工具执行过程不展示~~ ✅ v0.7.0：独立订阅 SSE `item/started|completed`，右下角浮层
   实时显示命令执行状态（运行中/成功/失败 + 退出码），最近 20 条
-- 无图片/文件上传（引擎 InputItem 支持 image，UI 未接）——**待修**
+- ~~无图片/文件上传~~ ✅ v0.7.2：回形针按钮 + Kotlin 选图落盘 + localImage 路径注入（协议实测勘破）
 
 ### P2：能力闲置与体验短板（i18n ✅ 已修复；其余未修）
 
-- 前端仅使用引擎 60 个 RPC 方法中的 **9 个**；skills（×4）、MCP（×3）、review/start、
-  turn/steer（对话中途转向）、thread/compact（上下文压缩）、thread/rollback、
-  gitDiffToRemote、fuzzyFileSearch、rateLimits 等全部无 UI 入口——**待修**
-- 无语音输入；无用量/速率显示——**待修**
+- 前端仅使用引擎 60 个 RPC 方法中的 **9 个** → v0.7.2 已新增 skills/list、
+  mcpServerStatus/list（只读面板）；review/start、turn/steer、thread/compact、
+  thread/rollback、gitDiffToRemote、fuzzyFileSearch 等仍无 UI 入口——**部分待修**
+- ~~无用量/速率显示~~ ✅ v0.7.2：SSE tokenUsage 驱动的上下文占用条（免登录）；
+  无语音输入——**待修**
 - ~~无 i18n（上游残留俄语 aria-label "Стоп"）~~ ✅ v0.7.0：界面全面中文化
 - 主题跟随系统暗色模式未确认
 
