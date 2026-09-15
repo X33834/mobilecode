@@ -5,4 +5,18 @@
         <item name="android:navigationBarColor">#020617</item>
         <item name="android:windowBackground">#020617</item>
     </style>
+
+    <style name="SettingsSectionTitle" parent="TextAppearance.MaterialComponents.Subtitle1">
+        <item name="android:textSize">13sp</item>
+        <item name="android:textColor">#64748b</item>
+        <item name="android:letterSpacing">0.04</item>
+        <item name="android:layout_marginBottom">8dp</item>
+        <item name="android:layout_marginStart">2dp</item>
+    </style>
+
+    <style name="SettingsLabel" parent="TextAppearance.MaterialComponents.Body2">
+        <item name="android:textSize">13sp</item>
+        <item name="android:textColor">#94a3b8</item>
+        <item name="android:layout_marginBottom">6dp</item>
+    </style>
 </resources>

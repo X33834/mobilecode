@@ -1,5 +1,47 @@
 # 更新日志
 
+## [v0.8.0] - 2026-09-15
+
+**模型配置完成度对标主流 agent（GPT / Trae / Qoder）：从「2 字段弹窗」升级为完整移动端设置页**
+
+### 背景（根因）
+
+手机上能下载打开、但模型配置「完全用不了」的真实原因不是崩溃，而是**配置面根本没做完整**：
+
+- 旧 ⚙ 设置只是一个 `AlertDialog`：只能从 4 个写死服务商里选 1 个 + 填 1 个 Key，
+  **没有模型选择、没有自定义 Base URL、没有自定义供应商、没有任何参数**——对标
+  GPT / Trae / Qoder 这根本不算「模型配置」。
+- 模型被写死（`gpt-4.1-mini` / `deepseek-chat` / `qwen-plus` / `glm-4.5`），用户无法切换。
+- 国内开发者最需要的 **OpenAI 兼容代理 / 自建 / 本地** 端点完全不支持。
+- DeepSeek / Qwen / GLM 全部押在一个本地 `chat-bridge` 协议桥上，而该桥在「文本 + 工具调用」
+  混合场景存在 finalize 缺陷（文本项未闭合就发工具调用），coding agent 的工具循环最容易踩。
+
+### 新增
+
+- **完整模型配置层（CodexServerManager）**：内置 8 家供应商目录（OpenAI / OpenRouter /
+  DeepSeek / Qwen / GLM / Moonshot / Ollama / 自定义），每家含预设模型列表；支持**预设 +
+  自定义模型名**、**自定义 Base URL**（OpenAI 兼容代理 / 自建 / 本地）、**端点类型**（自定义
+  供应商可选 Responses 直连或 Chat 经桥）。config.toml / auth.json 完整往返（含 Keystore 加密）。
+- **移动端设置页（SettingsActivity + activity_settings.xml）**：替代原简陋弹窗，分区为
+  「模型与服务商 / 外观 / 诊断与关于」——服务商下拉、模型下拉（预设 + 自定义）、API Key、
+  自定义 Base URL、端点类型、主题（跟随系统 / 浅色 / 深色）、测试连接、诊断与重置。
+- **chat-bridge 加固**：修复「文本 + 工具」混合回合中文本项未闭合就发工具调用的缺陷
+  （已用 mock 上游做集成测试，验证文本项在工具项之前正确闭合）；支持经环境变量
+  `CHAT_BRIDGE_ROUTES` 注入自定义上游路由，使「自定义-Chat」供应商也能走桥。
+- **外观主题**：设置页可选浅色 / 深色 / 跟随系统，经 `AppCompatDelegate` 全局生效
+  （工作台 WebView 暗色适配沿用 v0.7.1 的 `prefers-color-scheme` 覆盖）。
+
+### 验证
+
+- chat-bridge 集成测试（/tmp/bridge_test.js，mock 上游模拟文本 + 工具调用）：10 个 SSE 事件，
+  文本项 `output_item.done` 出现在工具项之前，`response.completed` 收尾，PASS。
+- Kotlin 改动沿既有 `MainActivity` 模式编写；受限于沙箱无 Android SDK，未跑 gradle 编译，
+  已逐行核对（ProviderSpec / ProviderSummary / SettingsActivity / Manifest 注册 / onResume 重载）。
+
+### 其它
+
+- versionCode 17 → 18，versionName 0.7.2 → 0.8.0。
+
 ## [v0.7.2] - 2026-09-15
 
 **全量测试 + 查漏补缺：P1 图片上传落地（协议勘破），Skills/MCP/用量三大能力入口补齐，审计报告 P1/P2 可修项清零**

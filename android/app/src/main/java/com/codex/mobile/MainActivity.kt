@@ -175,6 +175,15 @@ class MainActivity : AppCompatActivity() {
         stopService(Intent(this, CodexForegroundService::class.java))
     }
 
+    override fun onResume() {
+        super.onResume()
+        val flagPrefs = getSharedPreferences("mobilecode", MODE_PRIVATE)
+        if (flagPrefs.getString(SettingsActivity.FLAG_RELOAD, null) == "1") {
+            flagPrefs.edit().remove(SettingsActivity.FLAG_RELOAD).apply()
+            restartWorkbench()
+        }
+    }
+
     private fun requestBatteryOptimizationExemption() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
         val pm = getSystemService(PowerManager::class.java) ?: return
@@ -524,18 +533,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * ⚙ 设置菜单：配置 API Key / 诊断与环境。
+     * ⚙ 设置菜单：模型与设置 / 诊断与环境。
      */
     private fun showSettingsMenu() {
         runOnUiThread {
-            val items = arrayOf("配置 API Key", "诊断与环境")
+            val items = arrayOf("模型与设置", "诊断与环境")
             AlertDialog.Builder(this)
                 .setTitle(R.string.settings_title)
                 .setItems(items) { _, which ->
                     when (which) {
-                        0 -> showApiConfigDialog { provider, apiKey ->
-                            applyApiConfig(provider, apiKey)
-                        }
+                        0 -> startActivity(Intent(this, SettingsActivity::class.java))
                         1 -> showDiagnostics()
                     }
                 }
@@ -634,82 +641,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 弹出「模型服务商 + API Key」设置对话框（工作台右上角 ⚙ 触发）。
-     * 非阻塞：用户在弹窗里点「确定」且 Key 非空时回调 [onSaved]。
-     * 点「取消」或留空不保存（Key 为空视为取消）。
+     * 设置页保存后由 [onResume] 调用：停止旧工作台、重启服务（含协议桥）并刷新 WebView，
+     * 使新模型配置立即生效。若运行环境已被重置（目录缺失）则退回完整 setup。
      */
-    private fun showApiConfigDialog(onSaved: (provider: String, apiKey: String) -> Unit) {
-        val providers = arrayOf("openai", "deepseek", "qwen", "glm")
-        val currentProvider = serverManager.getConfiguredProvider()
-        val currentKey = serverManager.getConfiguredApiKey() ?: ""
-
-        runOnUiThread {
-            val input = EditText(this).apply {
-                hint = getString(R.string.api_key_hint)
-                setSingleLine(true)
-                setText(currentKey)
-            }
-            val providerSpinner = android.widget.Spinner(this)
-            val adapter = android.widget.ArrayAdapter(
-                this,
-                android.R.layout.simple_spinner_item,
-                providers,
-            )
-            adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-            providerSpinner.adapter = adapter
-            if (currentProvider != null) {
-                val idx = providers.indexOf(currentProvider)
-                if (idx >= 0) providerSpinner.setSelection(idx)
-            }
-
-            val label = TextView(this).apply {
-                text = "模型服务商"
-                setTextColor(0xFF94A3B8.toInt())
-                textSize = 13f
-            }
-            val keyLabel = TextView(this).apply {
-                text = "API Key"
-                setTextColor(0xFF94A3B8.toInt())
-                textSize = 13f
-            }
-
-            val padding = (24 * resources.displayMetrics.density).toInt()
-            val container = android.widget.LinearLayout(this).apply {
-                orientation = android.widget.LinearLayout.VERTICAL
-                setPadding(padding, padding / 2, padding, 0)
-                addView(label)
-                addView(providerSpinner)
-                addView(keyLabel)
-                addView(input)
-            }
-
-            AlertDialog.Builder(this)
-                .setTitle(R.string.settings_title)
-                .setMessage(R.string.api_key_message)
-                .setView(container)
-                .setCancelable(true)
-                .setPositiveButton(R.string.ok) { _, _ ->
-                    val provider = providerSpinner.selectedItem?.toString() ?: ""
-                    val key = input.text.toString().trim()
-                    if (key.isNotBlank() && provider.isNotBlank()) {
-                        onSaved(provider, key)
-                    }
-                }
-                .setNegativeButton(R.string.cancel, null)
-                .show()
-        }
-    }
-
-    /**
-     * 保存 provider + API Key 到 Codex 配置，并重启工作台使新密钥立即生效。
-     */
-    private fun applyApiConfig(provider: String, apiKey: String) {
-        val ok = serverManager.configureProvider(provider, apiKey)
-        if (!ok) {
-            toast("API 配置保存失败，请重试")
+    private fun restartWorkbench() {
+        if (serverManager.needsInstall()) {
+            startSetupFlow()
             return
         }
-        toast(getString(R.string.settings_saved_restart))
         Thread {
             try {
                 serverManager.stopServer()

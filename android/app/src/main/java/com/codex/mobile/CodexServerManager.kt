@@ -20,6 +20,17 @@ import java.net.URL
  * v0.4.0 起镜像拆成 4 个独立分片（assets/images0..3.bin），
  * 设备端 4 线程并行解压，多核 IO 并行让首次启动提速 2-3 倍。
  */
+/**
+ * 设置页对外暴露的供应商摘要（不泄漏内部 envKey / 上游等实现细节）。
+ */
+data class ProviderSummary(
+    val id: String,
+    val label: String,
+    val models: List<String>,
+    val allowCustomBaseUrl: Boolean,
+    val customOnly: Boolean,
+)
+
 class CodexServerManager(private val context: Context) {
 
     companion object {
@@ -185,35 +196,87 @@ class CodexServerManager(private val context: Context) {
             "/vendor/aarch64-unknown-linux-musl/codex/codex"
     }
 
+    /**
+     * 模型服务商规格。
+     * - [models] 第一个元素即默认模型；[directBaseUrl] 非 null 表示引擎可**直连**
+     *   Responses API（OpenAI 风格），写入 config.toml 的 base_url。
+     * - [chatUpstream] 非 null 表示纯 Chat Completions 上游，引擎无法直连，
+     *   必须经本地 chat-bridge（:18925）翻译；此时 config.toml 的 base_url 指向桥。
+     * - [allowCustomBaseUrl] 是否允许用户覆盖 base_url（OpenAI 兼容代理/自建/本地）。
+     * - [customOnly] 仅「自定义」供应商为 true：base_url 与上游完全由用户决定。
+     */
     private data class ProviderSpec(
         val id: String,
-        val model: String,
-        /** 引擎直连的 base_url（写入 config.toml）。chat 型 provider 指向本地 bridge。 */
-        val baseUrl: String,
+        val label: String,
+        val models: List<String>,
         val envKey: String,
-        /** 非 null 表示纯 Chat Completions 上游，须经 chat-bridge 翻译。 */
-        val upstreamChatUrl: String? = null,
-    )
+        val directBaseUrl: String? = null,
+        val chatUpstream: String? = null,
+        val allowCustomBaseUrl: Boolean = true,
+        val customOnly: Boolean = false,
+    ) {
+        /** 是否纯 Chat 上游（须经桥翻译）。 */
+        val isChatOnly: Boolean get() = chatUpstream != null
+        val defaultModel: String get() = models.firstOrNull() ?: ""
+    }
 
+    /** 内置供应商目录（顺序即设置页下拉顺序）。custom 为「自建/兼容端点」入口。 */
     private val providers = listOf(
-        // OpenAI 原生支持 Responses API：引擎直连
-        ProviderSpec("openai", "gpt-4.1-mini", "https://api.openai.com/v1", "OPENAI_API_KEY"),
-        // DeepSeek/Qwen/GLM 只提供 Chat Completions：
-        // 0.104.0 引擎已删除 wire_api="chat"，必须经本地 chat-bridge 翻译
+        // OpenAI：原生 Responses API，引擎直连
         ProviderSpec(
-            "deepseek", "deepseek-chat",
-            "http://127.0.0.1:$BRIDGE_PORT/deepseek/v1", "DEEPSEEK_API_KEY",
-            "https://api.deepseek.com/v1",
+            "openai", "OpenAI",
+            listOf("gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "gpt-4o", "gpt-4o-mini", "o4-mini", "o3-mini"),
+            "OPENAI_API_KEY",
+            directBaseUrl = "https://api.openai.com/v1",
         ),
+        // OpenRouter：转发到各家，且原生支持 OpenAI Responses API → 直连
         ProviderSpec(
-            "qwen", "qwen-plus",
-            "http://127.0.0.1:$BRIDGE_PORT/qwen/v1", "DASHSCOPE_API_KEY",
-            "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "openrouter", "OpenRouter",
+            listOf("openai/gpt-4.1", "anthropic/claude-3.5-sonnet", "google/gemini-2.0-pro-exp-02-05", "deepseek/deepseek-chat"),
+            "OPENROUTER_API_KEY",
+            directBaseUrl = "https://openrouter.ai/api/v1",
         ),
+        // DeepSeek：仅 Chat Completions，须经本地桥
         ProviderSpec(
-            "glm", "glm-4.5",
-            "http://127.0.0.1:$BRIDGE_PORT/glm/v1", "ZHIPU_API_KEY",
-            "https://open.bigmodel.cn/api/paas/v4",
+            "deepseek", "DeepSeek",
+            listOf("deepseek-chat", "deepseek-reasoner"),
+            "DEEPSEEK_API_KEY",
+            chatUpstream = "https://api.deepseek.com/v1",
+        ),
+        // 通义千问：DashScope 兼容模式，仅 Chat，须经桥
+        ProviderSpec(
+            "qwen", "通义千问 Qwen",
+            listOf("qwen-plus", "qwen-max", "qwen-turbo", "qwen2.5-coder-32b-instruct"),
+            "DASHSCOPE_API_KEY",
+            chatUpstream = "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        ),
+        // 智谱 GLM：仅 Chat，须经桥
+        ProviderSpec(
+            "glm", "智谱 GLM",
+            listOf("glm-4.5", "glm-4-plus", "glm-4-air", "glm-4-flash"),
+            "ZHIPU_API_KEY",
+            chatUpstream = "https://open.bigmodel.cn/api/paas/v4",
+        ),
+        // Moonshot（Kimi）：OpenAI 兼容，仅 Chat，须经桥
+        ProviderSpec(
+            "moonshot", "Moonshot Kimi",
+            listOf("moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"),
+            "MOONSHOT_API_KEY",
+            chatUpstream = "https://api.moonshot.cn/v1",
+        ),
+        // Ollama：本地 OpenAI 兼容，仅 Chat，须经桥（默认本地 11434）
+        ProviderSpec(
+            "ollama", "Ollama（本地）",
+            listOf("llama3.1", "qwen2.5", "deepseek-r1", "phi3"),
+            "OLLAMA_API_KEY",
+            chatUpstream = "http://127.0.0.1:11434/v1",
+        ),
+        // 自定义：base_url 与上游完全由用户填写（兼容各类 OpenAI 代理 / 自建 / vLLM）
+        ProviderSpec(
+            "custom", "自定义（OpenAI 兼容）",
+            listOf("custom-model"),
+            "CUSTOM_API_KEY",
+            customOnly = true,
         ),
     )
 
@@ -223,30 +286,98 @@ class CodexServerManager(private val context: Context) {
 
     fun getConfiguredProvider(): String? = prefs.getString("provider", null)
 
+    /** 用户选定的模型（可能为自定义文本）。 */
+    fun getConfiguredModel(): String? {
+        val m = prefs.getString("model", null)
+        return if (m.isNullOrBlank()) providers.firstOrNull { it.id == getConfiguredProvider() }?.defaultModel else m
+    }
+
+    /** 用户选定的自定义 base_url（仅允许覆盖的供应商）。 */
+    fun getConfiguredBaseUrl(): String? {
+        val raw = prefs.getString("base_url", null)
+        return if (raw.isNullOrBlank()) null else raw
+    }
+
+    /** 用户在「自定义」供应商下选择的端点类型：responses（直连）或 chat（经桥）。 */
+    fun getCustomEndpointType(): String = prefs.getString("custom_endpoint", "chat") ?: "chat"
+
+    /** 全部内置供应商摘要（设置页用）。 */
+    fun getAllProviders(): List<ProviderSummary> = providers.map { it.toSummary() }
+
+    /** 按 id 取供应商摘要。 */
+    fun getProviderSummary(id: String?): ProviderSummary? = providers.firstOrNull { it.id == id }?.toSummary()
+
+    private fun ProviderSpec.toSummary(): ProviderSummary =
+        ProviderSummary(id, label, models, allowCustomBaseUrl, customOnly)
+
     /** 读取 API Key（Keystore 加密存储，兼容旧明文）。 */
     fun getConfiguredApiKey(): String? =
         SecureKeyStore.decrypt(prefs.getString("api_key", null))
 
     /**
-     * 保存用户选择的 provider + API Key，并写入 Codex 配置
-     * （config.toml 注册全部 provider，auth.json 写入当前 Key）。
+     * 保存用户选择的 provider + 模型 + API Key（+ 可选自定义 base_url / 端点类型），
+     * 并写入 Codex 配置（config.toml 注册全部 provider，auth.json 写入当前 Key）。
      *
      * v0.6.0 修复：Codex 0.104.0 彻底移除了 wire_api="chat"，引擎只会讲
-     * Responses API。所有 provider 统一写 wire_api="responses"；纯 Chat 上游
-     * （DeepSeek/Qwen/GLM）的 base_url 指向本地 chat-bridge（:18925），由桥把
-     * Responses 翻译成 Chat Completions 转发上游。
-     * 同时修复 model 写法："provider/model" 复合串 0.104.0 无法绑定自定义
-     * provider（实测回落默认 openai），必须 model 与 model_provider 分离。
+     * Responses API。纯 Chat 上游（DeepSeek/Qwen/GLM/Ollama/自定义-Chat）的
+     * base_url 指向本地 chat-bridge（:18925），由桥把 Responses 翻译成 Chat
+     * Completions 转发上游；直连型（OpenAI/OpenRouter/自定义-Responses）的
+     * base_url 直接写用户端点。
+     * model 与 model_provider 必须分离（复合串 0.104.0 无法绑定自定义 provider）。
+     *
+     * @param baseUrl 用户自定义 base_url（OpenAI 兼容代理/自建/本地），为空则用默认。
+     * @param endpointType 仅「自定义」供应商使用："responses"（直连）或 "chat"（经桥）。
      */
-    fun configureProvider(providerId: String, apiKey: String): Boolean {
+    fun configureProvider(
+        providerId: String,
+        model: String,
+        apiKey: String,
+        baseUrl: String? = null,
+        endpointType: String = "chat",
+        startBridge: Boolean = true,
+    ): Boolean {
         val spec = providers.firstOrNull { it.id == providerId }
             ?: return false
         if (apiKey.isBlank()) return false
+        val effectiveModel = if (model.isBlank()) spec.defaultModel else model
+        val customBase = if (baseUrl.isNullOrBlank()) null else baseUrl.trim().removeSuffix("/")
 
-        prefs.edit()
-            .putString("provider", spec.id)
-            .putString("api_key", SecureKeyStore.encrypt(apiKey))
-            .apply()
+        // 计算所选 provider 的引擎 base_url 与是否经桥
+        val (engineBaseUrl: String, bridged: Boolean, bridgeRoutes: String) = when {
+            spec.customOnly -> {
+                if (endpointType == "responses") {
+                    // 直连 Responses：base_url 即用户端点；无需桥
+                    val u = customBase ?: "https://api.openai.com/v1"
+                    Triple(u, false, "")
+                } else {
+                    // 经桥（默认）：base_url 指向本地桥 /custom，上游=用户端点
+                    val u = customBase ?: "https://api.openai.com/v1"
+                    Triple("http://127.0.0.1:$BRIDGE_PORT/custom/v1", true, "/custom=$u")
+                }
+            }
+            spec.isChatOnly -> {
+                val u = customBase ?: spec.chatUpstream!!
+                Triple("http://127.0.0.1:$BRIDGE_PORT/${spec.id}/v1", true, "/${spec.id}=$u")
+            }
+            else -> {
+                // 直连 Responses
+                val u = customBase ?: spec.directBaseUrl!!
+                Triple(u, false, "")
+            }
+        }
+
+        prefs.edit().apply {
+            putString("provider", spec.id)
+            putString("model", effectiveModel)
+            putString("api_key", SecureKeyStore.encrypt(apiKey))
+            if (spec.allowCustomBaseUrl && customBase != null) putString("base_url", customBase)
+            else remove("base_url")
+            if (spec.customOnly) putString("custom_endpoint", endpointType) else remove("custom_endpoint")
+            // 桥路由：仅当选中 provider 经桥且上游被自定义时记录，供 startChatBridge 读取
+            if (bridged && bridgeRoutes.isNotBlank()) putString("bridge_routes", bridgeRoutes)
+            else remove("bridge_routes")
+            apply()
+        }
 
         val paths = BootstrapInstaller.getPaths(context)
         val configDir = File(paths.homeDir, ".codex")
@@ -255,13 +386,21 @@ class CodexServerManager(private val context: Context) {
         val toml = buildString {
             appendLine("approval_policy = \"never\"")
             appendLine("sandbox_mode = \"danger-full-access\"")
-            appendLine("model = \"${spec.model}\"")
+            appendLine("model = \"$effectiveModel\"")
             appendLine("model_provider = \"${spec.id}\"")
             appendLine()
             for (p in providers) {
+                val pBase = when {
+                    p.customOnly -> {
+                        if (getCustomEndpointType() == "responses") (getConfiguredBaseUrl() ?: "https://api.openai.com/v1")
+                        else "http://127.0.0.1:$BRIDGE_PORT/custom/v1"
+                    }
+                    p.isChatOnly -> "http://127.0.0.1:$BRIDGE_PORT/${p.id}/v1"
+                    else -> p.directBaseUrl ?: "https://api.openai.com/v1"
+                }
                 appendLine("[model_providers.${p.id}]")
                 appendLine("name = \"${p.id}\"")
-                appendLine("base_url = \"${p.baseUrl}\"")
+                appendLine("base_url = \"$pBase\"")
                 appendLine("env_key = \"${p.envKey}\"")
                 appendLine("wire_api = \"responses\"")
                 appendLine()
@@ -269,15 +408,22 @@ class CodexServerManager(private val context: Context) {
         }
         File(configDir, "config.toml").writeText(toml)
 
-        val authJson = """{"${spec.envKey}": "$apiKey", "OPENAI_API_KEY": "$apiKey"}"""
+        val safeKey = org.json.JSONObject.quote(apiKey)
+        val authJson = """{"${spec.envKey}": $safeKey, "OPENAI_API_KEY": $safeKey}"""
         File(configDir, "auth.json").writeText(authJson)
-        Log.i(TAG, "Provider configured: ${spec.id} (${spec.model})")
+        Log.i(TAG, "Provider configured: ${spec.id} model=$effectiveModel base=$engineBaseUrl bridged=$bridged")
 
-        // 选中的是纯 Chat 上游 → 确保本地协议桥已启动
-        if (spec.upstreamChatUrl != null && !startChatBridge()) {
+        if (bridged && startBridge && !startChatBridge()) {
             Log.e(TAG, "chat-bridge failed to start; chat-only provider ${spec.id} will not work")
         }
         return true
+    }
+
+    /** 当前所选 provider 是否需要经本地 chat-bridge（结合端点类型与自定义端点判断）。 */
+    private fun isChatBridgedProvider(providerId: String?): Boolean {
+        val spec = providers.firstOrNull { it.id == providerId } ?: return false
+        return if (spec.customOnly) getCustomEndpointType() == "chat" && !getConfiguredBaseUrl().isNullOrBlank()
+        else spec.isChatOnly
     }
 
     fun isLoggedIn(): Boolean {
@@ -308,7 +454,7 @@ class CodexServerManager(private val context: Context) {
         getConfiguredProvider()?.let { providerId ->
             providers.firstOrNull { it.id == providerId }?.let { spec ->
                 getConfiguredApiKey()?.let { key -> env[spec.envKey] = key }
-                if (spec.upstreamChatUrl != null && !startChatBridge()) {
+                if (isChatBridgedProvider(providerId) && !startChatBridge()) {
                     Log.e(TAG, "chat-bridge unavailable for provider ${spec.id}")
                 }
             }
@@ -501,6 +647,10 @@ class CodexServerManager(private val context: Context) {
         }
 
         val env = buildEnvironment(paths)
+        // 自定义 Chat 上游 / 覆盖内置上游：把路由表经 env 传给桥（桥会合并默认路由）
+        prefs.getString("bridge_routes", null)?.takeIf { it.isNotBlank() }?.let {
+            env["CHAT_BRIDGE_ROUTES"] = it
+        }
         val shell = "${paths.prefixDir}/bin/sh"
         val cmd = "exec node ${bridgeScript.absolutePath}"
 
@@ -572,7 +722,7 @@ class CodexServerManager(private val context: Context) {
             providers.firstOrNull { it.id == providerId }?.let { spec ->
                 getConfiguredApiKey()?.let { key -> env[spec.envKey] = key }
                 // chat 型 provider：先确保协议桥在跑（工作台会话经引擎→桥→上游）
-                if (spec.upstreamChatUrl != null && !startChatBridge()) {
+                if (isChatBridgedProvider(providerId) && !startChatBridge()) {
                     Log.e(TAG, "chat-bridge unavailable for provider ${spec.id}")
                 }
             }

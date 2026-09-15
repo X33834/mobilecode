@@ -246,7 +246,16 @@ function translateUpstream(upStream, upStatus, upHeaders, engineRes, respId, onF
   const closeText = () => {
     if (!textOpen) return;
     textOpen = false;
-    // text.done / item.done 在 [DONE] 汇总阶段统一发出（保持事件顺序简单）
+    // 工具调用之前必须把已累积的文本项闭合（output_text.done + output_item.done），
+    // 否则引擎在「文本 + 工具」混合回合里拿不到已生成的文本，只收到工具调用。
+    const id = engineRes._textId;
+    sseSend(engineRes, "response.output_text.done", { item_id: id, output_index: itemIndex, content_index: 0, text: textAccum });
+    sseSend(engineRes, "response.output_item.done", {
+      output_index: itemIndex,
+      item: msgItem(id, textAccum),
+    });
+    output.push(msgItem(id, textAccum));
+    itemIndex++;
   };
 
   const flushToolCalls = () => {

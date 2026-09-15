@@ -53,7 +53,7 @@ network your device needs is the one API call to your chosen model provider.
 └─────────────┘                 └──────────────────────────────────────────┘
                                      │  HTTPS (API calls only)
                                      ▼
-                              OpenAI · DeepSeek · Qwen · Zhipu GLM
+                              OpenAI · OpenRouter · DeepSeek · Qwen · GLM · …
 ```
 
 ## Features
@@ -61,7 +61,7 @@ network your device needs is the one API call to your chosen model provider.
 - **Zero-setup AI coding on mobile** — prebuilt, versioned runtime image inside the APK
 - **Fully offline first-run install** — the environment is extracted, never downloaded
 - **4-thread parallel extraction** — first launch in about a minute
-- **Multiple model providers** — OpenAI (default), DeepSeek, Qwen, Zhipu GLM; switch in one tap
+- **Complete model configuration** — 8 built-in providers (OpenAI, OpenRouter, DeepSeek, Qwen, Zhipu GLM, Moonshot, Ollama, custom) with preset + free-text model selection, custom OpenAI-compatible Base URL, and per-provider keys
 - **Secure API key storage** — Android Keystore-backed encryption (`SecureKeyStore`)
 - **Self-hosted web workspace** — served locally on `127.0.0.1:18923`, loaded in WebView
 - **Built-in CONNECT proxy** — lets the native binary reach HTTPS endpoints on-device
@@ -85,21 +85,32 @@ network your device needs is the one API call to your chosen model provider.
    The app extracts the built-in runtime environment (progress bar, ~1 minute),
    then starts the local workspace automatically.
 
-4. **Add your API key**
+4. **Configure a model**
 
-   Tap the **gear icon (⚙)** in the top-right corner, pick a provider, paste your
-   API key, and tap OK. The workspace restarts and you are ready to chat and code.
+   Tap the **gear icon (⚙)** in the top-right corner → **模型与设置**. Pick a provider
+   (OpenAI / OpenRouter / DeepSeek / Qwen / GLM / Moonshot / Ollama / 自定义), choose or
+   type a model, paste your API key, optionally set a custom Base URL (for OpenAI-compatible
+   proxies / self-hosted / local), and tap **保存并重启工作台**. You are then ready to chat
+   and code.
 
 ## Supported Model Providers
 
-| Provider | Default model | Base URL | Env key |
+| Provider | Preset models | Type | Env key |
 | --- | --- | --- | --- |
-| OpenAI | `gpt-4.1-mini` | `api.openai.com` | `OPENAI_API_KEY` |
-| DeepSeek | `deepseek-chat` | `api.deepseek.com` | `DEEPSEEK_API_KEY` |
-| Qwen (Alibaba) | `qwen-plus` | `dashscope.aliyuncs.com` | `DASHSCOPE_API_KEY` |
-| Zhipu GLM | `glm-4.5` | `open.bigmodel.cn` | `ZHIPU_API_KEY` |
+| OpenAI | `gpt-4.1`, `gpt-4.1-mini`, `gpt-4o`, `o4-mini` … | Responses (direct) | `OPENAI_API_KEY` |
+| OpenRouter | `openai/gpt-4.1`, `anthropic/claude-3.5-sonnet` … | Responses (direct) | `OPENROUTER_API_KEY` |
+| DeepSeek | `deepseek-chat`, `deepseek-reasoner` | Chat (via bridge) | `DEEPSEEK_API_KEY` |
+| Qwen (Alibaba) | `qwen-plus`, `qwen-max`, `qwen2.5-coder-32b-instruct` … | Chat (via bridge) | `DASHSCOPE_API_KEY` |
+| Zhipu GLM | `glm-4.5`, `glm-4-plus`, `glm-4-flash` … | Chat (via bridge) | `ZHIPU_API_KEY` |
+| Moonshot (Kimi) | `moonshot-v1-8k`, `moonshot-v1-128k` | Chat (via bridge) | `MOONSHOT_API_KEY` |
+| Ollama (local) | `llama3.1`, `qwen2.5`, `deepseek-r1` … | Chat (via bridge) | `OLLAMA_API_KEY` |
+| 自定义 | 任意 | Responses 或 Chat（可选） | `CUSTOM_API_KEY` |
 
-> Bring your own API key — the key never leaves your device and is stored encrypted.
+> **Custom Base URL**: for OpenAI / OpenRouter / 自定义-Responses, the Base URL is used
+> directly. For Chat-only providers (DeepSeek / Qwen / GLM / Moonshot / Ollama / 自定义-Chat),
+> traffic is routed through the on-device `chat-bridge` (`:18925`) that translates the
+> engine's Responses API into Chat Completions. Bring your own API key — it never leaves your
+> device and is stored encrypted in the Android Keystore.
 
 ## Build from Source
 
@@ -157,7 +168,7 @@ python3 scripts/build-image.py
 │                       │ HTTPS (API calls only)                  │
 └───────────────────────┼─────────────────────────────────────────┘
                         ▼
-              OpenAI · DeepSeek · Qwen · GLM
+              OpenAI · OpenRouter · DeepSeek · Qwen · GLM · …
 ```
 
 Key components:

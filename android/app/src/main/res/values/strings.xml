@@ -18,4 +18,32 @@
     <string name="error_server">工作台启动失败。</string>
     <string name="retry">重试</string>
     <string name="pick_image_title">选择要附加的图片</string>
+
+    <!-- 设置页（v0.8.0：完整模型配置） -->
+    <string name="settings_activity_title">设置</string>
+    <string name="settings_model_section">模型与服务商</string>
+    <string name="settings_provider">模型服务商</string>
+    <string name="settings_model">模型</string>
+    <string name="settings_model_custom">自定义模型…</string>
+    <string name="settings_custom_model_hint">填写模型名，如 gpt-4.1 / deepseek-chat / qwen-max</string>
+    <string name="settings_api_key">API Key</string>
+    <string name="settings_api_key_hint">sk-…（仅保存在本机）</string>
+    <string name="settings_base_url">自定义 Base URL（可选）</string>
+    <string name="settings_base_url_hint">OpenAI 兼容端点，写到 /v1，如 https://my-proxy.example/v1</string>
+    <string name="settings_endpoint_type">端点类型</string>
+    <string name="settings_endpoint_chat">Chat Completions（兼容多数代理 / 自建）</string>
+    <string name="settings_endpoint_responses">Responses API（原生 OpenAI 风格）</string>
+    <string name="settings_save_restart">保存并重启工作台</string>
+    <string name="settings_test">测试连接</string>
+    <string name="settings_appearance_section">外观</string>
+    <string name="settings_theme">主题</string>
+    <string name="settings_theme_system">跟随系统</string>
+    <string name="settings_theme_light">浅色</string>
+    <string name="settings_theme_dark">深色</string>
+    <string name="settings_saved_toast">已保存，正在重启工作台…</string>
+    <string name="settings_test_running">正在测试连接…</string>
+    <string name="settings_test_ok">连接测试通过 ✓</string>
+    <string name="settings_test_fail">连接测试失败：请检查 Key / 网络 / 端点</string>
+    <string name="settings_key_required">请先填写 API Key</string>
+    <string name="settings_section_diag">诊断与关于</string>
 </resources>
