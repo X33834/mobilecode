@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/version-0.6.1-blue" alt="版本 0.6.1"></a>
+  <a href="#"><img src="https://img.shields.io/badge/version-0.7.2-blue" alt="版本 0.7.2"></a>
   <a href="#"><img src="https://img.shields.io/badge/platform-Android%207.0%2B%20(ARM64)-green" alt="平台"></a>
   <a href="#"><img src="https://img.shields.io/badge/language-EN%20%7C%20%E4%B8%AD%E6%96%87-orange" alt="语言"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-lightgrey" alt="许可证"></a>
@@ -73,7 +73,7 @@ Mobilecode 是一个**安卓端的 AI 编程工作台**。APK 内置了完整的
 
 1. **下载 APK**
 
-   最新版：[`release/Mobilecode-v0.6.1-release.apk`](release/Mobilecode-v0.6.1-release.apk)（约 90 MB）
+   最新版：[`release/Mobilecode-v0.7.2-release.apk`](release/Mobilecode-v0.7.2-release.apk)（约 90 MB）
 
 2. **安装**
 
@@ -130,7 +130,7 @@ python3 scripts/build-image.py
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                       Android APK（v0.6.1）                      │
+│                       Android APK（v0.7.2）                      │
 │                                                                 │
 │  ┌──────────────────────┐        ┌───────────────────────────┐  │
 │  │      WebView 界面     │        │  MainActivity             │  │
@@ -173,7 +173,7 @@ python3 scripts/build-image.py
 
 ## 工作原理
 
-1. **镜像带版本** —— 镜像内含 `.runtime-version`（当前 `0.4.1`）。一旦与 App
+1. **镜像带版本** —— 镜像内含 `.runtime-version`（当前 `0.7.2`）。一旦与 App
    期望版本不符，App 只重解压一次，陈旧环境不会卡死启动。
 2. **一次离线安装** —— 首启把分片解压到 `files/usr/`，写入全权限 Codex 配置，
    并初始化 git 工作区。
@@ -193,6 +193,7 @@ mobilecode-repo/
 ├── SECURITY.md             ← 安全策略
 ├── CONTRIBUTING.md         ← 贡献指南
 ├── THIRD_PARTY_NOTICES.md  ← 内置开源组件清单
+├── robots.txt              ← 爬虫协议（SEO）
 ├── art/                    ← 宣传/主图素材
 ├── docs/
 │   ├── ROADMAP.md          ← 路线图与里程碑

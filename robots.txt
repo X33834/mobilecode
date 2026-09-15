@@ -1,0 +1,16 @@
+# robots.txt — Mobilecode
+# Crawl policy for the hosted project site and repository mirrors.
+# All intentional public content is fully crawlable; only local build
+# artifacts and machine-specific files are excluded from indexing.
+
+User-agent: *
+Allow: /
+
+# Local build outputs and machine-specific configuration.
+Disallow: /android/.gradle/
+Disallow: /android/build/
+Disallow: /android/app/build/
+Disallow: /android/local.properties
+
+# Generated runtime image shards (built on demand, not source).
+Disallow: /android/app/src/main/assets/

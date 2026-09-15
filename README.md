@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/version-0.6.1-blue" alt="Version 0.5.0"></a>
+  <a href="#"><img src="https://img.shields.io/badge/version-0.7.2-blue" alt="Version 0.7.2"></a>
   <a href="#"><img src="https://img.shields.io/badge/platform-Android%207.0%2B%20(ARM64)-green" alt="Platform"></a>
   <a href="#"><img src="https://img.shields.io/badge/language-EN%20%7C%20%E4%B8%AD%E6%96%87-orange" alt="Language"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-lightgrey" alt="License"></a>
@@ -73,7 +73,7 @@ network your device needs is the one API call to your chosen model provider.
 
 1. **Download the APK**
 
-   Latest release: [`release/Mobilecode-v0.6.1-release.apk`](release/Mobilecode-v0.6.1-release.apk) (~90 MB)
+   Latest release: [`release/Mobilecode-v0.7.2-release.apk`](release/Mobilecode-v0.7.2-release.apk) (~90 MB)
 
 2. **Install**
 
@@ -143,7 +143,7 @@ python3 scripts/build-image.py
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        Android APK (v0.6.1)                      │
+│                        Android APK (v0.7.2)                      │
 │                                                                 │
 │  ┌──────────────────────┐        ┌───────────────────────────┐  │
 │  │      WebView UI      │        │  MainActivity             │  │
@@ -187,7 +187,7 @@ Key components:
 
 ## How It Works
 
-1. **Versioned image** — the image carries `.runtime-version` (currently `0.4.1`).
+1. **Versioned image** — the image carries `.runtime-version` (currently `0.7.2`).
    If it ever mismatches the app’s expected version, the app re-extracts exactly once,
    so stale environments can never wedge startup.
 2. **One-time offline install** — first run extracts the shards to
@@ -208,6 +208,7 @@ mobilecode-repo/
 ├── SECURITY.md             ← security policy
 ├── CONTRIBUTING.md         ← how to contribute
 ├── THIRD_PARTY_NOTICES.md  ← bundled open-source components
+├── robots.txt              ← crawler policy (SEO)
 ├── art/                    ← marketing/hero assets
 ├── docs/
 │   ├── ROADMAP.md          ← roadmap & milestones
